@@ -1,0 +1,8 @@
+[Details]
+Name = "K2EXEmail"
+ID = "com.k2exe.k2exemail"
+Version = "0.1.0"
+Build = 1
+
+[Migrations]
+fyneDo = true
