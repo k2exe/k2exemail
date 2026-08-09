@@ -1,9 +1,9 @@
 package main
 
 import (
-	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/widget"
+
+	"github.com/k2exe/k2exemail/internal/ui"
 )
 
 const (
@@ -13,10 +13,7 @@ const (
 
 func main() {
 	a := app.NewWithID(appID)
-	w := a.NewWindow(appName)
-
-	w.SetContent(widget.NewLabel("K2EXEmail"))
-	w.Resize(fyne.NewSize(1200, 800))
+	w := ui.NewMainWindow(a, appName)
 
 	w.ShowAndRun()
 }
