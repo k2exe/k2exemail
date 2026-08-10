@@ -554,11 +554,13 @@ func newReaderPane(
 ) {
 	var selected mailbox.Message
 	var hasSelection bool
-	var removing bool
+	var mutating bool
 	var editAction *widget.ToolbarAction
 	var replyAction *widget.ToolbarAction
 	var replyAllAction *widget.ToolbarAction
 	var forwardAction *widget.ToolbarAction
+	var archiveAction *widget.ToolbarAction
+	var archiveSelected func()
 	var removeSelected func()
 
 	deleteAction := widget.NewToolbarAction(
@@ -577,7 +579,7 @@ func newReaderPane(
 		editAction = widget.NewToolbarAction(
 			theme.DocumentCreateIcon(),
 			func() {
-				if hasSelection && !removing {
+				if hasSelection && !mutating {
 					onEdit(selected)
 				}
 			},
@@ -594,7 +596,7 @@ func newReaderPane(
 			theme.MailReplyIcon(),
 			func() {
 				if hasSelection &&
-					!removing &&
+					!mutating &&
 					onReply != nil {
 					onReply(selected, false)
 				}
@@ -606,7 +608,7 @@ func newReaderPane(
 			theme.MailReplyAllIcon(),
 			func() {
 				if hasSelection &&
-					!removing &&
+					!mutating &&
 					onReply != nil {
 					onReply(selected, true)
 				}
@@ -618,7 +620,7 @@ func newReaderPane(
 			theme.MailForwardIcon(),
 			func() {
 				if hasSelection &&
-					!removing &&
+					!mutating &&
 					onForward != nil {
 					onForward(selected)
 				}
@@ -626,13 +628,82 @@ func newReaderPane(
 		)
 		forwardAction.Disable()
 
-		toolbar = widget.NewToolbar(
+		toolbarItems := []widget.ToolbarItem{
 			replyAction,
 			replyAllAction,
 			forwardAction,
 			widget.NewToolbarSeparator(),
-			deleteAction,
-		)
+		}
+
+		if folder == mailbox.FolderInbox ||
+			folder == mailbox.FolderArchive {
+			archiveIcon := theme.FolderIcon()
+			if folder == mailbox.FolderArchive {
+				archiveIcon = theme.NavigateBackIcon()
+			}
+
+			archiveAction = widget.NewToolbarAction(
+				archiveIcon,
+				func() {
+					if archiveSelected != nil {
+						archiveSelected()
+					}
+				},
+			)
+			archiveAction.Disable()
+			toolbarItems = append(
+				toolbarItems,
+				archiveAction,
+				widget.NewToolbarSeparator(),
+			)
+		}
+
+		toolbarItems = append(toolbarItems, deleteAction)
+		toolbar = widget.NewToolbar(toolbarItems...)
+	}
+
+	disableActions := func() {
+		deleteAction.Disable()
+
+		if editAction != nil {
+			editAction.Disable()
+		}
+		if replyAction != nil {
+			replyAction.Disable()
+		}
+		if replyAllAction != nil {
+			replyAllAction.Disable()
+		}
+		if forwardAction != nil {
+			forwardAction.Disable()
+		}
+		if archiveAction != nil {
+			archiveAction.Disable()
+		}
+	}
+
+	enableActions := func() {
+		if !hasSelection || mutating {
+			return
+		}
+
+		deleteAction.Enable()
+
+		if editAction != nil {
+			editAction.Enable()
+		}
+		if replyAction != nil && onReply != nil {
+			replyAction.Enable()
+		}
+		if replyAllAction != nil && onReply != nil {
+			replyAllAction.Enable()
+		}
+		if forwardAction != nil && onForward != nil {
+			forwardAction.Enable()
+		}
+		if archiveAction != nil {
+			archiveAction.Enable()
+		}
 	}
 
 	subject := widget.NewLabelWithStyle(
@@ -659,19 +730,7 @@ func newReaderPane(
 		selected = mailbox.Message{}
 		hasSelection = false
 
-		deleteAction.Disable()
-		if editAction != nil {
-			editAction.Disable()
-		}
-		if replyAction != nil {
-			replyAction.Disable()
-		}
-		if replyAllAction != nil {
-			replyAllAction.Disable()
-		}
-		if forwardAction != nil {
-			forwardAction.Disable()
-		}
+		disableActions()
 
 		subject.SetText("")
 		from.SetText("")
@@ -680,8 +739,60 @@ func newReaderPane(
 		showAttachments(mailbox.Message{})
 	}
 
+	archiveSelected = func() {
+		if !hasSelection ||
+			mutating ||
+			archiveAction == nil {
+			return
+		}
+
+		msg := selected
+
+		if activity != nil &&
+			!activity.beginMutation() {
+			dialog.ShowInformation(
+				"Mailbox busy",
+				"Messages cannot be moved while a CMS session or another mailbox update is active.",
+				parent,
+			)
+			return
+		}
+
+		mutating = true
+		disableActions()
+
+		go func() {
+			err := archiveOrRestoreMessage(
+				store,
+				folder,
+				msg.ID,
+			)
+
+			if activity != nil {
+				activity.endMutation()
+			}
+
+			fyne.Do(func() {
+				mutating = false
+
+				if err != nil {
+					enableActions()
+
+					dialog.ShowError(err, parent)
+					return
+				}
+
+				clearSelection()
+
+				if onRemoved != nil {
+					onRemoved()
+				}
+			})
+		}()
+	}
+
 	removeSelected = func() {
-		if !hasSelection || removing {
+		if !hasSelection || mutating {
 			return
 		}
 
@@ -698,20 +809,8 @@ func newReaderPane(
 				return
 			}
 
-			removing = true
-			deleteAction.Disable()
-			if editAction != nil {
-				editAction.Disable()
-			}
-			if replyAction != nil {
-				replyAction.Disable()
-			}
-			if replyAllAction != nil {
-				replyAllAction.Disable()
-			}
-			if forwardAction != nil {
-				forwardAction.Disable()
-			}
+			mutating = true
+			disableActions()
 
 			go func() {
 				err := trashOrDeleteMessage(
@@ -725,27 +824,10 @@ func newReaderPane(
 				}
 
 				fyne.Do(func() {
-					removing = false
+					mutating = false
 
 					if err != nil {
-						if hasSelection {
-							deleteAction.Enable()
-							if editAction != nil {
-								editAction.Enable()
-							}
-							if replyAction != nil &&
-								onReply != nil {
-								replyAction.Enable()
-							}
-							if replyAllAction != nil &&
-								onReply != nil {
-								replyAllAction.Enable()
-							}
-							if forwardAction != nil &&
-								onForward != nil {
-								forwardAction.Enable()
-							}
-						}
+						enableActions()
 
 						dialog.ShowError(err, parent)
 						return
@@ -790,24 +872,7 @@ func newReaderPane(
 		selected = msg
 		hasSelection = true
 
-		if !removing {
-			deleteAction.Enable()
-			if editAction != nil {
-				editAction.Enable()
-			}
-			if replyAction != nil &&
-				onReply != nil {
-				replyAction.Enable()
-			}
-			if replyAllAction != nil &&
-				onReply != nil {
-				replyAllAction.Enable()
-			}
-			if forwardAction != nil &&
-				onForward != nil {
-				forwardAction.Enable()
-			}
-		}
+		enableActions()
 
 		subject.SetText(msg.Subject)
 		from.SetText("From: " + msg.From)
