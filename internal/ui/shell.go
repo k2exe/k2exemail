@@ -623,6 +623,7 @@ func newReaderPane(
 	var archiveAction *widget.ToolbarAction
 	var starSelected func()
 	var toggleReadSelected func()
+	var markReadOnOpen func(mailbox.Message)
 	var archiveSelected func()
 	var removeSelected func()
 
@@ -943,16 +944,80 @@ func newReaderPane(
 					return
 				}
 
-				selected = updated
-
 				if onUpdated != nil {
 					onUpdated(updated)
 				}
 
-				readAction.SetIcon(
-					messageReadActionIcon(updated.Unread),
-				)
+				if sameMessageIdentity(selected, msg) {
+					selected = updated
+					readAction.SetIcon(
+						messageReadActionIcon(updated.Unread),
+					)
+				}
+
+				pending := selected
 				enableActions()
+
+				if !sameMessageIdentity(pending, msg) &&
+					pending.Unread &&
+					markReadOnOpen != nil {
+					markReadOnOpen(pending)
+				}
+			})
+		}()
+	}
+
+	markReadOnOpen = func(msg mailbox.Message) {
+		if view.isDrafts() ||
+			!msg.Unread ||
+			mutating ||
+			readAction == nil {
+			return
+		}
+
+		if activity != nil &&
+			!activity.beginMutation() {
+			return
+		}
+
+		mutating = true
+		disableActions()
+
+		go func() {
+			updated, err := setMessageUnread(
+				store,
+				msg,
+				false,
+			)
+
+			if activity != nil {
+				activity.endMutation()
+			}
+
+			fyne.Do(func() {
+				mutating = false
+
+				if err == nil {
+					if onUpdated != nil {
+						onUpdated(updated)
+					}
+
+					if sameMessageIdentity(selected, msg) {
+						selected = updated
+						readAction.SetIcon(
+							messageReadActionIcon(updated.Unread),
+						)
+					}
+				}
+
+				pending := selected
+				enableActions()
+
+				if !sameMessageIdentity(pending, msg) &&
+					pending.Unread &&
+					markReadOnOpen != nil {
+					markReadOnOpen(pending)
+				}
 			})
 		}()
 	}
@@ -1109,6 +1174,10 @@ func newReaderPane(
 		to.SetText("To: " + strings.Join(msg.To, ", "))
 		body.SetText(msg.Body)
 		showAttachments(msg)
+
+		if markReadOnOpen != nil {
+			markReadOnOpen(msg)
+		}
 	}
 
 	reader := container.NewBorder(
