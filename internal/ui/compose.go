@@ -75,9 +75,35 @@ func openComposeMessage(
 	callsign string,
 	onChanged func(),
 ) {
-	title := "New Message — K2EXEmail"
-	if persisted {
-		title = "Edit Draft — K2EXEmail"
+	openComposeMessageWithTitle(
+		a,
+		parent,
+		store,
+		draft,
+		persisted,
+		callsign,
+		onChanged,
+		"",
+	)
+}
+
+func openComposeMessageWithTitle(
+	a fyne.App,
+	parent fyne.Window,
+	store mailboxStore,
+	draft mailbox.Message,
+	persisted bool,
+	callsign string,
+	onChanged func(),
+	title string,
+) {
+	title = strings.TrimSpace(title)
+
+	if title == "" {
+		title = "New Message — K2EXEmail"
+		if persisted {
+			title = "Edit Draft — K2EXEmail"
+		}
 	}
 
 	w := a.NewWindow(title)

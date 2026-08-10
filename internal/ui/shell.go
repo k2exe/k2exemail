@@ -60,12 +60,31 @@ func newMailShell(
 		)
 	}
 
+	openForward := func(msg mailbox.Message) {
+		callsign, _ := getIdentity()
+
+		openForwardWindow(
+			a,
+			parent,
+			messages,
+			msg,
+			callsign,
+			activity,
+			func() {
+				if switchFolder != nil {
+					switchFolder(currentFolder)
+				}
+			},
+		)
+	}
+
 	reader, showMessage := newReaderPane(
 		parent,
 		messages,
 		mailbox.FolderInbox,
 		nil,
 		openReply,
+		openForward,
 		activity,
 		func() {
 			if switchFolder != nil &&
@@ -146,6 +165,7 @@ func newMailShell(
 					folder,
 					onEdit,
 					openReply,
+					openForward,
 					activity,
 					func() {
 						if currentFolder == folder {
@@ -496,6 +516,7 @@ func newReaderPane(
 	folder mailbox.Folder,
 	onEdit func(mailbox.Message),
 	onReply func(mailbox.Message, bool),
+	onForward func(mailbox.Message),
 	activity *mailboxActivityGate,
 	onRemoved func(),
 ) (fyne.CanvasObject, func(mailbox.Message)) {
@@ -561,11 +582,15 @@ func newReaderPane(
 		)
 		replyAllAction.Disable()
 
-		// Forward needs attachment-copy semantics and is implemented
-		// separately rather than silently dropping attachments.
 		forwardAction = widget.NewToolbarAction(
 			theme.MailForwardIcon(),
-			func() {},
+			func() {
+				if hasSelection &&
+					!removing &&
+					onForward != nil {
+					onForward(selected)
+				}
+			},
 		)
 		forwardAction.Disable()
 
@@ -612,6 +637,9 @@ func newReaderPane(
 		if replyAllAction != nil {
 			replyAllAction.Disable()
 		}
+		if forwardAction != nil {
+			forwardAction.Disable()
+		}
 
 		subject.SetText("")
 		from.SetText("")
@@ -649,6 +677,9 @@ func newReaderPane(
 			if replyAllAction != nil {
 				replyAllAction.Disable()
 			}
+			if forwardAction != nil {
+				forwardAction.Disable()
+			}
 
 			go func() {
 				err := trashOrDeleteMessage(
@@ -677,6 +708,10 @@ func newReaderPane(
 							if replyAllAction != nil &&
 								onReply != nil {
 								replyAllAction.Enable()
+							}
+							if forwardAction != nil &&
+								onForward != nil {
+								forwardAction.Enable()
 							}
 						}
 
@@ -735,6 +770,10 @@ func newReaderPane(
 			if replyAllAction != nil &&
 				onReply != nil {
 				replyAllAction.Enable()
+			}
+			if forwardAction != nil &&
+				onForward != nil {
+				forwardAction.Enable()
 			}
 		}
 
