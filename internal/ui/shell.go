@@ -559,7 +559,9 @@ func newReaderPane(
 	var replyAction *widget.ToolbarAction
 	var replyAllAction *widget.ToolbarAction
 	var forwardAction *widget.ToolbarAction
+	var starAction *widget.ToolbarAction
 	var archiveAction *widget.ToolbarAction
+	var starSelected func()
 	var archiveSelected func()
 	var removeSelected func()
 
@@ -628,11 +630,22 @@ func newReaderPane(
 		)
 		forwardAction.Disable()
 
+		starAction = widget.NewToolbarAction(
+			messageStarIcon(false),
+			func() {
+				if starSelected != nil {
+					starSelected()
+				}
+			},
+		)
+		starAction.Disable()
+
 		toolbarItems := []widget.ToolbarItem{
 			replyAction,
 			replyAllAction,
 			forwardAction,
 			widget.NewToolbarSeparator(),
+			starAction,
 		}
 
 		if folder == mailbox.FolderInbox ||
@@ -677,6 +690,9 @@ func newReaderPane(
 		if forwardAction != nil {
 			forwardAction.Disable()
 		}
+		if starAction != nil {
+			starAction.Disable()
+		}
 		if archiveAction != nil {
 			archiveAction.Disable()
 		}
@@ -700,6 +716,9 @@ func newReaderPane(
 		}
 		if forwardAction != nil && onForward != nil {
 			forwardAction.Enable()
+		}
+		if starAction != nil {
+			starAction.Enable()
 		}
 		if archiveAction != nil {
 			archiveAction.Enable()
@@ -737,6 +756,57 @@ func newReaderPane(
 		to.SetText("")
 		body.SetText("")
 		showAttachments(mailbox.Message{})
+	}
+
+	starSelected = func() {
+		if !hasSelection ||
+			mutating ||
+			starAction == nil {
+			return
+		}
+
+		msg := selected
+
+		if activity != nil &&
+			!activity.beginMutation() {
+			dialog.ShowInformation(
+				"Mailbox busy",
+				"Messages cannot be changed while a CMS session or another mailbox update is active.",
+				parent,
+			)
+			return
+		}
+
+		mutating = true
+		disableActions()
+
+		go func() {
+			updated, err := setMessageStarred(
+				store,
+				msg,
+				!msg.Starred,
+			)
+
+			if activity != nil {
+				activity.endMutation()
+			}
+
+			fyne.Do(func() {
+				mutating = false
+
+				if err != nil {
+					enableActions()
+					dialog.ShowError(err, parent)
+					return
+				}
+
+				selected = updated
+				starAction.SetIcon(
+					messageStarIcon(updated.Starred),
+				)
+				enableActions()
+			})
+		}()
 	}
 
 	archiveSelected = func() {
@@ -871,6 +941,12 @@ func newReaderPane(
 	showMessage := func(msg mailbox.Message) {
 		selected = msg
 		hasSelection = true
+
+		if starAction != nil {
+			starAction.SetIcon(
+				messageStarIcon(msg.Starred),
+			)
+		}
 
 		enableActions()
 
