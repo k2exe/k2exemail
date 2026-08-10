@@ -166,7 +166,9 @@ func connectCMS(
 
 	options.Address = strings.TrimSpace(options.Address)
 	if options.Address == "" {
-		options.Address = CMSProductionAddress
+		return fbb.TrafficStats{}, fmt.Errorf(
+			"CMS address is required",
+		)
 	}
 
 	options.Callsign = strings.ToUpper(

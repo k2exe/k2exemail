@@ -44,6 +44,7 @@ func TestConnectCMSUsesWinlinkTelnetSettings(t *testing.T) {
 		context.Background(),
 		store,
 		CMSOptions{
+			Address:  CMSProductionAddress,
 			Callsign: " k2exe ",
 			Locator:  "FN13",
 		},
@@ -114,6 +115,7 @@ func TestConnectCMSDialFailure(t *testing.T) {
 		context.Background(),
 		store,
 		CMSOptions{
+			Address:  CMSProductionAddress,
 			Callsign: "K2EXE",
 			Locator:  "FN13",
 		},
@@ -156,6 +158,7 @@ func TestConnectCMSValidatesBeforeDial(t *testing.T) {
 		context.Background(),
 		store,
 		CMSOptions{
+			Address: CMSProductionAddress,
 			Locator: "FN13",
 		},
 		dial,
@@ -354,5 +357,42 @@ func TestConnectCMSUsesConfiguredAddress(t *testing.T) {
 			gotAddress,
 			CMSTestAddress,
 		)
+	}
+}
+
+func TestConnectCMSRequiresExplicitAddress(t *testing.T) {
+	called := false
+
+	dial := func(
+		context.Context,
+		string,
+		string,
+		string,
+	) (net.Conn, error) {
+		called = true
+		return nil, errors.New("unexpected dial")
+	}
+
+	store := mailbox.NewStore(t.TempDir())
+
+	_, err := connectCMS(
+		context.Background(),
+		store,
+		CMSOptions{
+			Callsign: "K2EXE",
+			Locator:  "FN23va",
+		},
+		dial,
+	)
+	if err == nil {
+		t.Fatal("connectCMS() expected missing-address error")
+	}
+
+	if !strings.Contains(err.Error(), "CMS address is required") {
+		t.Fatalf("connectCMS() error = %v", err)
+	}
+
+	if called {
+		t.Fatal("dialer called without explicit CMS address")
 	}
 }

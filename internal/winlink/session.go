@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net"
 	"strings"
 
@@ -22,6 +24,7 @@ type ExchangeOptions struct {
 	Master      bool
 	UserAgent   fbb.UserAgent
 	SecureLogin SecureLoginFunc
+	Logger      *log.Logger
 }
 
 func Exchange(
@@ -93,6 +96,12 @@ func Exchange(
 	)
 
 	session.IsMaster(options.Master)
+
+	logger := options.Logger
+	if logger == nil {
+		logger = log.New(io.Discard, "", 0)
+	}
+	session.SetLogger(logger)
 
 	if options.UserAgent.Name != "" {
 		session.SetUserAgent(options.UserAgent)
