@@ -2,6 +2,7 @@ package mailbox
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -70,8 +71,8 @@ func TestMessageJSONRoundTrip(t *testing.T) {
 		t.Fatalf("ID = %q, want %q", decoded.ID, original.ID)
 	}
 
-	if decoded.Folder != FolderDrafts {
-		t.Fatalf("Folder = %q, want %q", decoded.Folder, FolderDrafts)
+	if strings.Contains(string(data), `"folder"`) {
+		t.Fatal("serialized message unexpectedly contains folder")
 	}
 
 	if decoded.Subject != original.Subject {

@@ -43,7 +43,7 @@ type Message struct {
 	SchemaVersion int          `json:"schema_version"`
 	ID            string       `json:"id"`
 	WinlinkMID    string       `json:"winlink_mid,omitempty"`
-	Folder        Folder       `json:"folder"`
+	Folder        Folder       `json:"-"`
 	From          string       `json:"from,omitempty"`
 	To            []string     `json:"to,omitempty"`
 	Cc            []string     `json:"cc,omitempty"`

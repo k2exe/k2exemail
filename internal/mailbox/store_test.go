@@ -211,3 +211,47 @@ func testMessage(id string, folder Folder) Message {
 		UpdatedAt: now,
 	}
 }
+
+func TestStoreLoadsLegacyMessageWithSerializedFolder(t *testing.T) {
+	store := newTestStore(t)
+
+	id := "legacy-message"
+	dir := store.messagePath(FolderOutbox, id)
+
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	legacy := []byte(`{
+  "schema_version": 1,
+  "id": "legacy-message",
+  "folder": "drafts",
+  "to": ["W2ABC"],
+  "subject": "Legacy queued message",
+  "body": "Stored before folder metadata was removed.",
+  "created_at": "2026-08-10T00:00:00Z",
+  "updated_at": "2026-08-10T00:01:00Z"
+}
+`)
+
+	if err := os.WriteFile(
+		filepath.Join(dir, messageFileName),
+		legacy,
+		0o600,
+	); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	msg, err := store.Load(FolderOutbox, id)
+	if err != nil {
+		t.Fatalf("Load() legacy message error = %v", err)
+	}
+
+	if msg.Folder != FolderOutbox {
+		t.Fatalf("Folder = %q, want %q", msg.Folder, FolderOutbox)
+	}
+
+	if msg.Subject != "Legacy queued message" {
+		t.Fatalf("Subject = %q", msg.Subject)
+	}
+}

@@ -6,21 +6,24 @@ import (
 	"github.com/k2exe/k2exemail/internal/mailbox"
 )
 
-type mailboxReader interface {
+type mailboxStore interface {
 	List(folder mailbox.Folder) ([]mailbox.Message, error)
+	Save(msg mailbox.Message) error
+	Move(from, to mailbox.Folder, id string) error
 }
 
 func NewMainWindow(
 	a fyne.App,
 	title string,
-	messages mailboxReader,
+	store mailboxStore,
 ) (fyne.Window, error) {
-	content, err := newMailShell(messages)
+	w := a.NewWindow(title)
+
+	content, err := newMailShell(a, w, store)
 	if err != nil {
 		return nil, err
 	}
 
-	w := a.NewWindow(title)
 	w.SetContent(content)
 	w.Resize(fyne.NewSize(1200, 800))
 

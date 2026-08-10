@@ -11,7 +11,11 @@ import (
 	"github.com/k2exe/k2exemail/internal/mailbox"
 )
 
-func newMailShell(messages mailboxReader) (fyne.CanvasObject, error) {
+func newMailShell(
+	a fyne.App,
+	parent fyne.Window,
+	messages mailboxStore,
+) (fyne.CanvasObject, error) {
 	inbox, err := messages.List(mailbox.FolderInbox)
 	if err != nil {
 		return nil, err
@@ -19,7 +23,9 @@ func newMailShell(messages mailboxReader) (fyne.CanvasObject, error) {
 
 	reader, showMessage := newReaderPane()
 
-	sidebar := newSidebar()
+	sidebar := newSidebar(func() {
+		openComposeWindow(a, parent, messages)
+	})
 	messagePane := newMessagePane(inbox, showMessage)
 
 	content := container.NewHSplit(messagePane, reader)
@@ -31,11 +37,11 @@ func newMailShell(messages mailboxReader) (fyne.CanvasObject, error) {
 	return shell, nil
 }
 
-func newSidebar() fyne.CanvasObject {
+func newSidebar(onCompose func()) fyne.CanvasObject {
 	compose := widget.NewButtonWithIcon(
 		"Compose",
 		theme.MailComposeIcon(),
-		func() {},
+		onCompose,
 	)
 	compose.Importance = widget.HighImportance
 	compose.Alignment = widget.ButtonAlignLeading
