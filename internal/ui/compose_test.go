@@ -99,12 +99,17 @@ func TestComposeSnapshotPreservesDraftIdentity(t *testing.T) {
 
 	got := composeSnapshot(
 		base,
+		"k2exe",
 		"W2ABC; W3XYZ",
 		"KR2SSY",
 		" Updated subject ",
 		"Updated body",
 		updated,
 	)
+
+	if got.From != "K2EXE" {
+		t.Fatalf("From = %q, want K2EXE", got.From)
+	}
 
 	if got.ID != base.ID {
 		t.Fatalf("ID = %q, want %q", got.ID, base.ID)

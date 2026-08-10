@@ -18,6 +18,7 @@ func newMailShell(
 	a fyne.App,
 	parent fyne.Window,
 	messages mailboxStore,
+	callsign string,
 ) (fyne.CanvasObject, error) {
 	inbox, err := messages.List(mailbox.FolderInbox)
 	if err != nil {
@@ -86,6 +87,7 @@ func newMailShell(
 							parent,
 							messages,
 							msg,
+							callsign,
 							func() {
 								switchFolder(currentFolder)
 							},
@@ -115,6 +117,7 @@ func newMailShell(
 				a,
 				parent,
 				messages,
+				callsign,
 				func() {
 					switchFolder(currentFolder)
 				},

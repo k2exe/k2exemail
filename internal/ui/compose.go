@@ -18,6 +18,7 @@ func openComposeWindow(
 	a fyne.App,
 	parent fyne.Window,
 	store mailboxStore,
+	callsign string,
 	onChanged func(),
 ) {
 	draft, err := mailbox.NewDraft()
@@ -32,6 +33,7 @@ func openComposeWindow(
 		store,
 		draft,
 		false,
+		callsign,
 		onChanged,
 	)
 }
@@ -41,6 +43,7 @@ func openDraftWindow(
 	parent fyne.Window,
 	store mailboxStore,
 	draft mailbox.Message,
+	callsign string,
 	onChanged func(),
 ) {
 	if draft.Folder != mailbox.FolderDrafts {
@@ -57,6 +60,7 @@ func openDraftWindow(
 		store,
 		draft,
 		true,
+		callsign,
 		onChanged,
 	)
 }
@@ -67,6 +71,7 @@ func openComposeMessage(
 	store mailboxStore,
 	draft mailbox.Message,
 	persisted bool,
+	callsign string,
 	onChanged func(),
 ) {
 	title := "New Message — K2EXEmail"
@@ -131,6 +136,7 @@ func openComposeMessage(
 	snapshot := func() mailbox.Message {
 		return composeSnapshot(
 			draft,
+			callsign,
 			to.Text,
 			cc.Text,
 			subject.Text,
@@ -281,6 +287,7 @@ func openComposeMessage(
 
 func composeSnapshot(
 	base mailbox.Message,
+	callsign string,
 	to string,
 	cc string,
 	subject string,
@@ -288,6 +295,7 @@ func composeSnapshot(
 	updatedAt time.Time,
 ) mailbox.Message {
 	base.Folder = mailbox.FolderDrafts
+	base.From = strings.ToUpper(strings.TrimSpace(callsign))
 	base.To = splitRecipients(to)
 	base.Cc = splitRecipients(cc)
 	base.Subject = strings.TrimSpace(subject)

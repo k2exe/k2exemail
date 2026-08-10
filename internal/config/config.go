@@ -26,6 +26,12 @@ func Default() Config {
 	}
 }
 
+func (c Config) IdentityReady() bool {
+	c = c.Normalized()
+
+	return c.Callsign != "" && c.Locator != ""
+}
+
 func (c Config) Normalized() Config {
 	c.SchemaVersion = CurrentSchemaVersion
 	c.Callsign = strings.ToUpper(strings.TrimSpace(c.Callsign))
