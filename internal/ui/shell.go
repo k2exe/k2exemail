@@ -805,10 +805,6 @@ func newReaderPane(
 					messageStarIcon(updated.Starred),
 				)
 				enableActions()
-
-				if onRemoved != nil {
-					onRemoved()
-				}
 			})
 		}()
 	}
