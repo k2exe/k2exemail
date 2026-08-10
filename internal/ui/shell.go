@@ -18,6 +18,9 @@ func newMailShell(
 	a fyne.App,
 	parent fyne.Window,
 	messages mailboxStore,
+	callsign string,
+	locator string,
+	connectCMS CMSConnectFunc,
 ) (fyne.CanvasObject, error) {
 	inbox, err := messages.List(mailbox.FolderInbox)
 	if err != nil {
@@ -86,6 +89,7 @@ func newMailShell(
 							parent,
 							messages,
 							msg,
+							callsign,
 							func() {
 								switchFolder(currentFolder)
 							},
@@ -109,18 +113,46 @@ func newMailShell(
 		}()
 	}
 
+	var cmsActive atomic.Bool
+	var connectionsWindow fyne.Window
+
+	openConnections := func() {
+		if connectionsWindow != nil {
+			connectionsWindow.RequestFocus()
+			return
+		}
+
+		connectionsWindow = newConnectionsWindow(
+			a,
+			callsign,
+			locator,
+			connectCMS,
+			&cmsActive,
+			func() {
+				switchFolder(currentFolder)
+			},
+			func() {
+				connectionsWindow = nil
+			},
+		)
+
+		connectionsWindow.Show()
+	}
+
 	sidebar := newSidebar(
 		func() {
 			openComposeWindow(
 				a,
 				parent,
 				messages,
+				callsign,
 				func() {
 					switchFolder(currentFolder)
 				},
 			)
 		},
 		switchFolder,
+		openConnections,
 	)
 
 	shell := container.NewHSplit(sidebar, content)
@@ -132,6 +164,7 @@ func newMailShell(
 func newSidebar(
 	onCompose func(),
 	onFolder func(mailbox.Folder),
+	onConnections func(),
 ) fyne.CanvasObject {
 	compose := widget.NewButtonWithIcon(
 		"Compose",
@@ -179,7 +212,11 @@ func newSidebar(
 			func() { onFolder(mailbox.FolderTrash) },
 		),
 		widget.NewSeparator(),
-		navButton("Connections", theme.FolderIcon(), nil),
+		navButton(
+			"Connections",
+			theme.FolderIcon(),
+			onConnections,
+		),
 		navButton("Contacts", nil, nil),
 		navButton("RMS List", nil, nil),
 		navButton("Activity", theme.HistoryIcon(), nil),
