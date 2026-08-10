@@ -312,3 +312,47 @@ func TestDialCMSTelnetLogin(t *testing.T) {
 		t.Fatal("CMS telnet login did not finish")
 	}
 }
+
+func TestConnectCMSUsesConfiguredAddress(t *testing.T) {
+	wantErr := errors.New("stop after dial")
+	var gotAddress string
+
+	dial := func(
+		ctx context.Context,
+		address string,
+		callsign string,
+		password string,
+	) (net.Conn, error) {
+		gotAddress = address
+		return nil, wantErr
+	}
+
+	store := mailbox.NewStore(t.TempDir())
+
+	_, err := connectCMS(
+		context.Background(),
+		store,
+		CMSOptions{
+			Address:  CMSTestAddress,
+			Callsign: "K2EXE",
+			Locator:  "FN23va",
+		},
+		dial,
+	)
+
+	if !errors.Is(err, wantErr) {
+		t.Fatalf(
+			"connectCMS() error = %v, want %v",
+			err,
+			wantErr,
+		)
+	}
+
+	if gotAddress != CMSTestAddress {
+		t.Fatalf(
+			"address = %q, want %q",
+			gotAddress,
+			CMSTestAddress,
+		)
+	}
+}

@@ -17,10 +17,19 @@ func NewMainWindow(
 	title string,
 	store mailboxStore,
 	callsign string,
+	locator string,
+	connectCMS CMSConnectFunc,
 ) (fyne.Window, error) {
 	w := a.NewWindow(title)
 
-	content, err := newMailShell(a, w, store, callsign)
+	content, err := newMailShell(
+		a,
+		w,
+		store,
+		callsign,
+		locator,
+		connectCMS,
+	)
 	if err != nil {
 		return nil, err
 	}

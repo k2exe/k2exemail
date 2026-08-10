@@ -12,7 +12,13 @@ import (
 	"github.com/la5nta/wl2k-go/transport/telnet"
 )
 
+const (
+	CMSProductionAddress = telnet.CMSAddress
+	CMSTestAddress       = "cms-z.winlink.org:8772"
+)
+
 type CMSOptions struct {
+	Address     string
 	Callsign    string
 	Locator     string
 	UserAgent   fbb.UserAgent
@@ -158,6 +164,11 @@ func connectCMS(
 		)
 	}
 
+	options.Address = strings.TrimSpace(options.Address)
+	if options.Address == "" {
+		options.Address = CMSProductionAddress
+	}
+
 	options.Callsign = strings.ToUpper(
 		strings.TrimSpace(options.Callsign),
 	)
@@ -178,7 +189,7 @@ func connectCMS(
 
 	conn, err := dial(
 		ctx,
-		telnet.CMSAddress,
+		options.Address,
 		options.Callsign,
 		telnet.CMSPassword,
 	)
