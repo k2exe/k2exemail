@@ -319,23 +319,169 @@ func TestHandlerLoadsStoredAttachment(t *testing.T) {
 	}
 }
 
-func TestHandlerDefersInbound(t *testing.T) {
+func TestHandlerPersistsInbound(t *testing.T) {
 	store := newTestStore(t)
 	handler := NewHandler(store, "K2EXE")
 
-	if got := handler.GetInboundAnswer(
-		fbb.Proposal{},
-	); got != fbb.Defer {
+	if err := handler.Prepare(); err != nil {
+		t.Fatalf("Prepare() error = %v", err)
+	}
+
+	wire := fbb.NewMessage(fbb.Private, "W2ABC")
+	wire.Header.Set(fbb.HEADER_MID, "ABC123456789")
+	wire.AddTo("K2EXE")
+	wire.SetSubject("Inbound")
+
+	if err := wire.SetBody("Received"); err != nil {
+		t.Fatalf("SetBody() error = %v", err)
+	}
+
+	wire.AddFile(
+		fbb.NewFile("notes.txt", []byte("hello")),
+	)
+
+	if err := handler.ProcessInbound(wire); err != nil {
+		t.Fatalf("ProcessInbound() error = %v", err)
+	}
+
+	inbox, err := store.List(mailbox.FolderInbox)
+	if err != nil {
+		t.Fatalf("List(Inbox) error = %v", err)
+	}
+
+	if len(inbox) != 1 {
+		t.Fatalf("Inbox count = %d, want 1", len(inbox))
+	}
+
+	if inbox[0].WinlinkMID != "ABC123456789" {
 		t.Fatalf(
-			"GetInboundAnswer() = %v, want Defer",
+			"WinlinkMID = %q",
+			inbox[0].WinlinkMID,
+		)
+	}
+
+	if !inbox[0].Unread {
+		t.Fatal("received message is not unread")
+	}
+
+	if len(inbox[0].Attachments) != 1 {
+		t.Fatalf(
+			"attachment count = %d, want 1",
+			len(inbox[0].Attachments),
+		)
+	}
+}
+
+func TestHandlerRejectsPreviouslyReceivedMID(t *testing.T) {
+	store := newTestStore(t)
+
+	msg, err := mailbox.NewMessage(mailbox.FolderArchive)
+	if err != nil {
+		t.Fatalf("NewMessage() error = %v", err)
+	}
+
+	msg.WinlinkMID = "ABC123456789"
+
+	if err := store.Save(msg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	handler := NewHandler(store, "K2EXE")
+	if err := handler.Prepare(); err != nil {
+		t.Fatalf("Prepare() error = %v", err)
+	}
+
+	proposal := fbb.NewProposal(
+		"ABC123456789",
+		"Duplicate",
+		fbb.Wl2kProposal,
+		nil,
+	)
+
+	if got := handler.GetInboundAnswer(*proposal); got != fbb.Reject {
+		t.Fatalf(
+			"GetInboundAnswer() = %v, want Reject",
+			got,
+		)
+	}
+}
+
+func TestHandlerAcceptsUnknownInboundMID(t *testing.T) {
+	store := newTestStore(t)
+	handler := NewHandler(store, "K2EXE")
+
+	if err := handler.Prepare(); err != nil {
+		t.Fatalf("Prepare() error = %v", err)
+	}
+
+	proposal := fbb.NewProposal(
+		"NEW123456789",
+		"New message",
+		fbb.Wl2kProposal,
+		nil,
+	)
+
+	if got := handler.GetInboundAnswer(*proposal); got != fbb.Accept {
+		t.Fatalf(
+			"GetInboundAnswer() = %v, want Accept",
+			got,
+		)
+	}
+}
+
+func TestHandlerRejectsMIDAfterInboundPersistence(t *testing.T) {
+	store := newTestStore(t)
+	handler := NewHandler(store, "K2EXE")
+
+	if err := handler.Prepare(); err != nil {
+		t.Fatalf("Prepare() error = %v", err)
+	}
+
+	wire := fbb.NewMessage(fbb.Private, "W2ABC")
+	wire.Header.Set(fbb.HEADER_MID, "ABC123456789")
+	wire.AddTo("K2EXE")
+	wire.SetSubject("Inbound")
+
+	if err := wire.SetBody("Received"); err != nil {
+		t.Fatalf("SetBody() error = %v", err)
+	}
+
+	if err := handler.ProcessInbound(wire); err != nil {
+		t.Fatalf("ProcessInbound() error = %v", err)
+	}
+
+	proposal := fbb.NewProposal(
+		"ABC123456789",
+		"Duplicate",
+		fbb.Wl2kProposal,
+		nil,
+	)
+
+	if got := handler.GetInboundAnswer(*proposal); got != fbb.Reject {
+		t.Fatalf(
+			"GetInboundAnswer() = %v, want Reject",
 			got,
 		)
 	}
 
-	if err := handler.ProcessInbound(
-		fbb.NewMessage(fbb.Private, "W2ABC"),
-	); err == nil {
-		t.Fatal("ProcessInbound() expected disabled error")
+	// Defensive duplicate processing must not create a second local copy.
+	if err := handler.ProcessInbound(wire); err != nil {
+		t.Fatalf(
+			"duplicate ProcessInbound() error = %v",
+			err,
+		)
+	}
+
+	inbox, err := store.List(mailbox.FolderInbox)
+	if err != nil {
+		t.Fatalf("List(Inbox) error = %v", err)
+	}
+
+	if len(inbox) != 1 {
+		t.Fatalf(
+			"Inbox count after duplicate = %d, want 1",
+			len(inbox),
+		)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 
 	"github.com/k2exe/k2exemail/internal/mailbox"
@@ -19,6 +20,7 @@ type Handler struct {
 	messageID  map[string]string
 	deferred   map[string]bool
 	completed  map[string]bool
+	inboundMID map[string]bool
 	sessionErr error
 }
 
@@ -26,8 +28,9 @@ var _ fbb.MBoxHandler = (*Handler)(nil)
 
 func NewHandler(store *mailbox.Store, mycall string) *Handler {
 	return &Handler{
-		store:  store,
-		mycall: mycall,
+		store:      store,
+		mycall:     mycall,
+		inboundMID: make(map[string]bool),
 	}
 }
 
@@ -41,12 +44,22 @@ func (h *Handler) Prepare() error {
 	h.messageID = make(map[string]string)
 	h.deferred = make(map[string]bool)
 	h.completed = make(map[string]bool)
+	h.inboundMID = make(map[string]bool)
 	h.sessionErr = nil
 	h.mu.Unlock()
 
 	if err := h.store.Prepare(); err != nil {
 		return fmt.Errorf("prepare mailbox store: %w", err)
 	}
+
+	inboundMID, err := h.loadInboundMIDs()
+	if err != nil {
+		return err
+	}
+
+	h.mu.Lock()
+	h.inboundMID = inboundMID
+	h.mu.Unlock()
 
 	messages, err := h.store.List(mailbox.FolderOutbox)
 	if err != nil {
@@ -201,21 +214,99 @@ func (h *Handler) Err() error {
 	return h.sessionErr
 }
 
-// Receive persistence is added in the next slice. Until then every
-// inbound proposal is explicitly deferred, making this handler safe
-// for send-only sessions.
 func (h *Handler) GetInboundAnswer(
-	fbb.Proposal,
+	proposal fbb.Proposal,
 ) fbb.ProposalAnswer {
-	return fbb.Defer
+	mid := strings.TrimSpace(proposal.MID())
+	if mid == "" {
+		return fbb.Defer
+	}
+
+	h.mu.Lock()
+	seen := h.inboundMID[mid]
+	h.mu.Unlock()
+
+	if seen {
+		return fbb.Reject
+	}
+
+	return fbb.Accept
 }
 
 func (h *Handler) ProcessInbound(
-	...*fbb.Message,
+	messages ...*fbb.Message,
 ) error {
-	return fmt.Errorf(
-		"inbound Winlink persistence is not enabled",
-	)
+	if h.store == nil {
+		return fmt.Errorf("mailbox store is required")
+	}
+
+	for _, wire := range messages {
+		msg, attachments, err := FromFBB(wire)
+		if err != nil {
+			return fmt.Errorf(
+				"convert inbound Winlink message: %w",
+				err,
+			)
+		}
+
+		h.mu.Lock()
+		seen := h.inboundMID[msg.WinlinkMID]
+		h.mu.Unlock()
+
+		if seen {
+			continue
+		}
+
+		if _, err := h.store.ImportMessage(
+			msg,
+			attachments,
+		); err != nil {
+			return fmt.Errorf(
+				"persist inbound Winlink message %q: %w",
+				msg.WinlinkMID,
+				err,
+			)
+		}
+
+		h.mu.Lock()
+		if h.inboundMID == nil {
+			h.inboundMID = make(map[string]bool)
+		}
+		h.inboundMID[msg.WinlinkMID] = true
+		h.mu.Unlock()
+	}
+
+	return nil
+}
+
+func (h *Handler) loadInboundMIDs() (map[string]bool, error) {
+	seen := make(map[string]bool)
+
+	folders := []mailbox.Folder{
+		mailbox.FolderInbox,
+		mailbox.FolderArchive,
+		mailbox.FolderSpam,
+		mailbox.FolderTrash,
+	}
+
+	for _, folder := range folders {
+		messages, err := h.store.List(folder)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"load %s for Winlink duplicate detection: %w",
+				folder,
+				err,
+			)
+		}
+
+		for _, msg := range messages {
+			if mid := strings.TrimSpace(msg.WinlinkMID); mid != "" {
+				seen[mid] = true
+			}
+		}
+	}
+
+	return seen, nil
 }
 
 func (h *Handler) loadAttachment(
