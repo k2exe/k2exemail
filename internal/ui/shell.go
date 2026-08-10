@@ -1,54 +1,34 @@
 package ui
 
 import (
+	"strings"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+
+	"github.com/k2exe/k2exemail/internal/mailbox"
 )
 
-type messagePreview struct {
-	sender  string
-	subject string
-	snippet string
-}
+func newMailShell(messages mailboxReader) (fyne.CanvasObject, error) {
+	inbox, err := messages.List(mailbox.FolderInbox)
+	if err != nil {
+		return nil, err
+	}
 
-var sampleMessages = []messagePreview{
-	{
-		sender:  "Winlink System",
-		subject: "Welcome to K2EXEmail",
-		snippet: "Placeholder message used to validate the desktop layout.",
-	},
-	{
-		sender:  "BBRC",
-		subject: "AREDN exercise traffic",
-		snippet: "Sample traffic for the message list.",
-	},
-	{
-		sender:  "K2EXE",
-		subject: "Field deployment notes",
-		snippet: "Draft planning notes for an offline operation.",
-	},
-	{
-		sender:  "Weather",
-		subject: "Weather bulletin",
-		snippet: "Sample bulletin content for UI development.",
-	},
-}
-
-func newMailShell() fyne.CanvasObject {
 	reader, showMessage := newReaderPane()
 
 	sidebar := newSidebar()
-	messages := newMessagePane(showMessage)
+	messagePane := newMessagePane(inbox, showMessage)
 
-	content := container.NewHSplit(messages, reader)
+	content := container.NewHSplit(messagePane, reader)
 	content.SetOffset(0.38)
 
 	shell := container.NewHSplit(sidebar, content)
 	shell.SetOffset(0.18)
 
-	return shell
+	return shell, nil
 }
 
 func newSidebar() fyne.CanvasObject {
@@ -101,7 +81,10 @@ func navButton(label string, icon fyne.Resource) *widget.Button {
 	return button
 }
 
-func newMessagePane(showMessage func(messagePreview)) fyne.CanvasObject {
+func newMessagePane(
+	messages []mailbox.Message,
+	showMessage func(mailbox.Message),
+) fyne.CanvasObject {
 	title := widget.NewLabelWithStyle(
 		"Inbox",
 		fyne.TextAlignLeading,
@@ -111,9 +94,22 @@ func newMessagePane(showMessage func(messagePreview)) fyne.CanvasObject {
 	search := widget.NewEntry()
 	search.SetPlaceHolder("Search mail")
 
+	if len(messages) == 0 {
+		empty := widget.NewLabel("No messages in Inbox")
+		empty.Alignment = fyne.TextAlignCenter
+
+		return container.NewBorder(
+			container.NewVBox(title, search),
+			nil,
+			nil,
+			nil,
+			container.NewCenter(empty),
+		)
+	}
+
 	list := widget.NewList(
 		func() int {
-			return len(sampleMessages)
+			return len(messages)
 		},
 		func() fyne.CanvasObject {
 			sender := widget.NewLabelWithStyle(
@@ -130,17 +126,17 @@ func newMessagePane(showMessage func(messagePreview)) fyne.CanvasObject {
 			return container.NewVBox(sender, subject, snippet)
 		},
 		func(id widget.ListItemID, object fyne.CanvasObject) {
-			message := sampleMessages[id]
+			message := messages[id]
 			row := object.(*fyne.Container)
 
-			row.Objects[0].(*widget.Label).SetText(message.sender)
-			row.Objects[1].(*widget.Label).SetText(message.subject)
-			row.Objects[2].(*widget.Label).SetText(message.snippet)
+			row.Objects[0].(*widget.Label).SetText(message.From)
+			row.Objects[1].(*widget.Label).SetText(message.Subject)
+			row.Objects[2].(*widget.Label).SetText(messageSnippet(message.Body))
 		},
 	)
 
 	list.OnSelected = func(id widget.ListItemID) {
-		showMessage(sampleMessages[id])
+		showMessage(messages[id])
 	}
 
 	list.Select(0)
@@ -154,7 +150,7 @@ func newMessagePane(showMessage func(messagePreview)) fyne.CanvasObject {
 	)
 }
 
-func newReaderPane() (fyne.CanvasObject, func(messagePreview)) {
+func newReaderPane() (fyne.CanvasObject, func(mailbox.Message)) {
 	toolbar := widget.NewToolbar(
 		widget.NewToolbarAction(theme.MailReplyIcon(), func() {}),
 		widget.NewToolbarAction(theme.MailReplyAllIcon(), func() {}),
@@ -171,7 +167,7 @@ func newReaderPane() (fyne.CanvasObject, func(messagePreview)) {
 	subject.Wrapping = fyne.TextWrapWord
 
 	from := widget.NewLabel("")
-	to := widget.NewLabel("To: K2EXE")
+	to := widget.NewLabel("")
 
 	body := widget.NewLabel("")
 	body.Wrapping = fyne.TextWrapWord
@@ -185,10 +181,11 @@ func newReaderPane() (fyne.CanvasObject, func(messagePreview)) {
 		body,
 	)
 
-	showMessage := func(msg messagePreview) {
-		subject.SetText(msg.subject)
-		from.SetText("From: " + msg.sender)
-		body.SetText(msg.snippet)
+	showMessage := func(msg mailbox.Message) {
+		subject.SetText(msg.Subject)
+		from.SetText("From: " + msg.From)
+		to.SetText("To: " + strings.Join(msg.To, ", "))
+		body.SetText(msg.Body)
 	}
 
 	reader := container.NewBorder(
@@ -200,4 +197,17 @@ func newReaderPane() (fyne.CanvasObject, func(messagePreview)) {
 	)
 
 	return reader, showMessage
+}
+
+func messageSnippet(body string) string {
+	body = strings.ReplaceAll(body, "\r\n", "\n")
+	body = strings.ReplaceAll(body, "\r", "\n")
+
+	for _, line := range strings.Split(body, "\n") {
+		if text := strings.TrimSpace(line); text != "" {
+			return text
+		}
+	}
+
+	return ""
 }
