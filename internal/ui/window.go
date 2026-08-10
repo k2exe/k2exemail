@@ -12,6 +12,7 @@ type mailboxStore interface {
 	List(folder mailbox.Folder) ([]mailbox.Message, error)
 	Save(msg mailbox.Message) error
 	Move(from, to mailbox.Folder, id string) error
+	Delete(folder mailbox.Folder, id string) error
 
 	AddAttachmentReader(
 		folder mailbox.Folder,

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync/atomic"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -30,14 +29,14 @@ func newConnectionsWindow(
 	callsign string,
 	locator string,
 	connectCMS CMSConnectFunc,
-	active *atomic.Bool,
+	activity *mailboxActivityGate,
 	onMailboxChanged func(),
 	onClosed func(),
 ) fyne.Window {
 	w := a.NewWindow("Connections")
 
-	if active == nil {
-		active = &atomic.Bool{}
+	if activity == nil {
+		activity = &mailboxActivityGate{}
 	}
 
 	header := widget.NewLabelWithStyle(
@@ -142,9 +141,9 @@ func newConnectionsWindow(
 			return
 		}
 
-		if !active.CompareAndSwap(false, true) {
+		if !activity.beginCMS() {
 			status.SetText(
-				"A CMS session is already running.",
+				"A CMS session or mailbox update is already running.",
 			)
 			return
 		}
@@ -177,7 +176,7 @@ func newConnectionsWindow(
 			secret = ""
 
 			fyne.Do(func() {
-				active.Store(false)
+				activity.endCMS()
 				currentCancel = nil
 
 				cancelButton.Disable()
