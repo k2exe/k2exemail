@@ -10,16 +10,23 @@ import (
 )
 
 type attachmentReaderStub struct {
-	reader     io.ReadCloser
-	attachment mailbox.Attachment
-	err        error
+	reader       io.ReadCloser
+	attachment   mailbox.Attachment
+	err          error
+	folder       mailbox.Folder
+	messageID    string
+	attachmentID string
 }
 
 func (s *attachmentReaderStub) OpenAttachmentReader(
-	mailbox.Folder,
-	string,
-	string,
+	folder mailbox.Folder,
+	messageID string,
+	attachmentID string,
 ) (io.ReadCloser, mailbox.Attachment, error) {
+	s.folder = folder
+	s.messageID = messageID
+	s.attachmentID = attachmentID
+
 	return s.reader, s.attachment, s.err
 }
 
@@ -41,6 +48,51 @@ type trackedWriteCloser struct {
 func (w *trackedWriteCloser) Close() error {
 	w.closed = true
 	return nil
+}
+
+func TestOpenAttachmentReaderForMessageUsesMessageFolder(
+	t *testing.T,
+) {
+	store := &attachmentReaderStub{}
+
+	msg := mailbox.Message{
+		ID:     "sent-message",
+		Folder: mailbox.FolderSent,
+	}
+
+	_, _, err := openAttachmentReaderForMessage(
+		store,
+		msg,
+		"attachment-1",
+	)
+	if err != nil {
+		t.Fatalf(
+			"openAttachmentReaderForMessage() error = %v",
+			err,
+		)
+	}
+
+	if store.folder != mailbox.FolderSent {
+		t.Fatalf(
+			"folder = %q, want %q",
+			store.folder,
+			mailbox.FolderSent,
+		)
+	}
+
+	if store.messageID != "sent-message" {
+		t.Fatalf(
+			"message ID = %q, want sent-message",
+			store.messageID,
+		)
+	}
+
+	if store.attachmentID != "attachment-1" {
+		t.Fatalf(
+			"attachment ID = %q, want attachment-1",
+			store.attachmentID,
+		)
+	}
 }
 
 func TestSaveAttachmentToWriterCopiesAndCloses(t *testing.T) {

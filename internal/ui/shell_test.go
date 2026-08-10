@@ -72,3 +72,37 @@ func TestMessageListPrimary(t *testing.T) {
 		t.Fatalf("inbox primary = %q", got)
 	}
 }
+
+func TestMessageListPrimaryForStarredViewUsesMessageFolder(
+	t *testing.T,
+) {
+	sent := mailbox.Message{
+		Folder: mailbox.FolderSent,
+		To:     []string{"K2EXE", "W2ABC"},
+	}
+
+	if got := messageListPrimaryForView(
+		starredMailView(),
+		sent,
+	); got != "To: K2EXE, W2ABC" {
+		t.Fatalf(
+			"starred Sent primary = %q, want recipient",
+			got,
+		)
+	}
+
+	inbox := mailbox.Message{
+		Folder: mailbox.FolderInbox,
+		From:   "W2XYZ",
+	}
+
+	if got := messageListPrimaryForView(
+		starredMailView(),
+		inbox,
+	); got != "W2XYZ" {
+		t.Fatalf(
+			"starred Inbox primary = %q, want sender",
+			got,
+		)
+	}
+}

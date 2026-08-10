@@ -30,13 +30,15 @@ func newMailShell(
 		return identity()
 	}
 
-	inbox, err := messages.List(mailbox.FolderInbox)
+	inboxView := folderMailView(mailbox.FolderInbox)
+
+	inbox, err := loadMailView(messages, inboxView)
 	if err != nil {
 		return nil, err
 	}
 
-	currentFolder := mailbox.FolderInbox
-	var switchFolder func(mailbox.Folder)
+	currentView := inboxView
+	var switchView func(mailView)
 	activity := &mailboxActivityGate{}
 
 	openReply := func(
@@ -53,8 +55,8 @@ func newMailShell(
 			callsign,
 			replyAll,
 			func() {
-				if switchFolder != nil {
-					switchFolder(currentFolder)
+				if switchView != nil {
+					switchView(currentView)
 				}
 			},
 		)
@@ -71,31 +73,38 @@ func newMailShell(
 			callsign,
 			activity,
 			func() {
-				if switchFolder != nil {
-					switchFolder(currentFolder)
+				if switchView != nil {
+					switchView(currentView)
 				}
 			},
 		)
 	}
 
+	var updateMessage func(mailbox.Message)
+
 	reader, showMessage, clearMessage := newReaderPane(
 		parent,
 		messages,
-		mailbox.FolderInbox,
+		inboxView,
 		nil,
 		openReply,
 		openForward,
 		activity,
+		func(updated mailbox.Message) {
+			if updateMessage != nil {
+				updateMessage(updated)
+			}
+		},
 		func() {
-			if switchFolder != nil &&
-				currentFolder == mailbox.FolderInbox {
-				switchFolder(mailbox.FolderInbox)
+			if switchView != nil &&
+				currentView == inboxView {
+				switchView(inboxView)
 			}
 		},
 	)
 
-	messagePane := newMessagePane(
-		mailbox.FolderInbox,
+	messagePane, updateMessage := newMessagePane(
+		inboxView,
 		inbox,
 		showMessage,
 		clearMessage,
@@ -106,18 +115,18 @@ func newMailShell(
 
 	var loadGeneration atomic.Uint64
 
-	switchFolder = func(folder mailbox.Folder) {
-		currentFolder = folder
+	switchView = func(view mailView) {
+		currentView = view
 		request := loadGeneration.Add(1)
 
-		content.Leading = newFolderStatusPane(
-			folder,
+		content.Leading = newMailViewStatusPane(
+			view,
 			"Loading...",
 		)
 		content.Refresh()
 
 		go func() {
-			loaded, err := messages.List(folder)
+			loaded, err := loadMailView(messages, view)
 
 			fyne.Do(func() {
 				if request != loadGeneration.Load() {
@@ -125,8 +134,8 @@ func newMailShell(
 				}
 
 				if err != nil {
-					content.Leading = newFolderStatusPane(
-						folder,
+					content.Leading = newMailViewStatusPane(
+						view,
 						"Unable to load messages",
 					)
 					content.Refresh()
@@ -134,7 +143,7 @@ func newMailShell(
 					dialog.ShowError(
 						fmt.Errorf(
 							"load %s: %w",
-							folderTitle(folder),
+							view.title(),
 							err,
 						),
 						parent,
@@ -143,7 +152,7 @@ func newMailShell(
 				}
 
 				var onEdit func(mailbox.Message)
-				if folder == mailbox.FolderDrafts {
+				if view.isDrafts() {
 					onEdit = func(msg mailbox.Message) {
 						callsign, _ := getIdentity()
 
@@ -154,33 +163,44 @@ func newMailShell(
 							msg,
 							callsign,
 							func() {
-								switchFolder(currentFolder)
+								switchView(currentView)
 							},
 						)
 					}
 				}
 
-				nextReader, nextShowMessage, nextClearMessage := newReaderPane(
-					parent,
-					messages,
-					folder,
-					onEdit,
-					openReply,
-					openForward,
-					activity,
-					func() {
-						if currentFolder == folder {
-							switchFolder(folder)
-						}
-					},
-				)
+				var updateMessage func(mailbox.Message)
 
-				content.Leading = newMessagePane(
-					folder,
+				nextReader, nextShowMessage, nextClearMessage :=
+					newReaderPane(
+						parent,
+						messages,
+						view,
+						onEdit,
+						openReply,
+						openForward,
+						activity,
+						func(updated mailbox.Message) {
+							if updateMessage != nil {
+								updateMessage(updated)
+							}
+						},
+						func() {
+							if currentView == view {
+								switchView(view)
+							}
+						},
+					)
+
+				var nextMessagePane fyne.CanvasObject
+				nextMessagePane, updateMessage = newMessagePane(
+					view,
 					loaded,
 					nextShowMessage,
 					nextClearMessage,
 				)
+
+				content.Leading = nextMessagePane
 				content.Trailing = nextReader
 				content.Refresh()
 			})
@@ -205,7 +225,7 @@ func newMailShell(
 			connectCMS,
 			activity,
 			func() {
-				switchFolder(currentFolder)
+				switchView(currentView)
 			},
 			func() {
 				connectionsWindow = nil
@@ -246,11 +266,11 @@ func newMailShell(
 				messages,
 				callsign,
 				func() {
-					switchFolder(currentFolder)
+					switchView(currentView)
 				},
 			)
 		},
-		switchFolder,
+		switchView,
 		openConnections,
 		openSettings,
 	)
@@ -263,7 +283,7 @@ func newMailShell(
 
 func newSidebar(
 	onCompose func(),
-	onFolder func(mailbox.Folder),
+	onView func(mailView),
 	onConnections func(),
 	onSettings func(),
 ) fyne.CanvasObject {
@@ -279,38 +299,58 @@ func newSidebar(
 		navButton(
 			"Inbox",
 			theme.FolderOpenIcon(),
-			func() { onFolder(mailbox.FolderInbox) },
+			func() {
+				onView(folderMailView(mailbox.FolderInbox))
+			},
 		),
-		navButton("Starred", nil, nil),
+		navButton(
+			"Starred",
+			messageStarOutlineIcon,
+			func() {
+				onView(starredMailView())
+			},
+		),
 		navButton(
 			"Drafts",
 			theme.DocumentCreateIcon(),
-			func() { onFolder(mailbox.FolderDrafts) },
+			func() {
+				onView(folderMailView(mailbox.FolderDrafts))
+			},
 		),
 		navButton(
 			"Outbox",
 			theme.MailSendIcon(),
-			func() { onFolder(mailbox.FolderOutbox) },
+			func() {
+				onView(folderMailView(mailbox.FolderOutbox))
+			},
 		),
 		navButton(
 			"Sent",
 			theme.MailSendIcon(),
-			func() { onFolder(mailbox.FolderSent) },
+			func() {
+				onView(folderMailView(mailbox.FolderSent))
+			},
 		),
 		navButton(
 			"Archive",
 			theme.FolderIcon(),
-			func() { onFolder(mailbox.FolderArchive) },
+			func() {
+				onView(folderMailView(mailbox.FolderArchive))
+			},
 		),
 		navButton(
 			"Spam",
 			theme.WarningIcon(),
-			func() { onFolder(mailbox.FolderSpam) },
+			func() {
+				onView(folderMailView(mailbox.FolderSpam))
+			},
 		),
 		navButton(
 			"Trash",
 			theme.DeleteIcon(),
-			func() { onFolder(mailbox.FolderTrash) },
+			func() {
+				onView(folderMailView(mailbox.FolderTrash))
+			},
 		),
 		widget.NewSeparator(),
 		navButton(
@@ -365,12 +405,12 @@ func navButton(
 }
 
 func newMessagePane(
-	folder mailbox.Folder,
+	view mailView,
 	messages []mailbox.Message,
 	showMessage func(mailbox.Message),
 	clearMessage func(),
-) fyne.CanvasObject {
-	titleText := folderTitle(folder)
+) (fyne.CanvasObject, func(mailbox.Message)) {
+	titleText := view.title()
 
 	title := widget.NewLabelWithStyle(
 		titleText,
@@ -393,7 +433,7 @@ func newMessagePane(
 			nil,
 			nil,
 			container.NewCenter(empty),
-		)
+		), func(mailbox.Message) {}
 	}
 
 	filtered := messages
@@ -425,7 +465,7 @@ func newMessagePane(
 			row := object.(*fyne.Container)
 
 			row.Objects[0].(*widget.Label).SetText(
-				messageListPrimary(folder, message),
+				messageListPrimaryForView(view, message),
 			)
 			row.Objects[1].(*widget.Label).SetText(
 				message.Subject,
@@ -465,21 +505,39 @@ func newMessagePane(
 
 	list.Select(0)
 
+	updateMessage := func(updated mailbox.Message) {
+		replaceMessageSnapshot(messages, updated)
+		replaceMessageSnapshot(filtered, updated)
+		list.Refresh()
+	}
+
 	return container.NewBorder(
 		container.NewVBox(title, search),
 		nil,
 		nil,
 		nil,
 		list,
-	)
+	), updateMessage
 }
 
-func newFolderStatusPane(
-	folder mailbox.Folder,
+func messageListPrimaryForView(
+	view mailView,
+	msg mailbox.Message,
+) string {
+	folder := view.folder
+	if view.isStarred() {
+		folder = msg.Folder
+	}
+
+	return messageListPrimary(folder, msg)
+}
+
+func newMailViewStatusPane(
+	view mailView,
 	status string,
 ) fyne.CanvasObject {
 	title := widget.NewLabelWithStyle(
-		folderTitle(folder),
+		view.title(),
 		fyne.TextAlignLeading,
 		fyne.TextStyle{Bold: true},
 	)
@@ -541,11 +599,12 @@ func messageListPrimary(
 func newReaderPane(
 	parent fyne.Window,
 	store mailboxStore,
-	folder mailbox.Folder,
+	view mailView,
 	onEdit func(mailbox.Message),
 	onReply func(mailbox.Message, bool),
 	onForward func(mailbox.Message),
 	activity *mailboxActivityGate,
+	onUpdated func(mailbox.Message),
 	onRemoved func(),
 ) (
 	fyne.CanvasObject,
@@ -577,7 +636,7 @@ func newReaderPane(
 
 	var toolbar *widget.Toolbar
 
-	if folder == mailbox.FolderDrafts && onEdit != nil {
+	if view.isDrafts() && onEdit != nil {
 		editAction = widget.NewToolbarAction(
 			theme.DocumentCreateIcon(),
 			func() {
@@ -648,10 +707,11 @@ func newReaderPane(
 			starAction,
 		}
 
-		if folder == mailbox.FolderInbox ||
-			folder == mailbox.FolderArchive {
+		if !view.isStarred() &&
+			(view.folder == mailbox.FolderInbox ||
+				view.folder == mailbox.FolderArchive) {
 			archiveIcon := theme.FolderIcon()
-			if folder == mailbox.FolderArchive {
+			if view.folder == mailbox.FolderArchive {
 				archiveIcon = theme.NavigateBackIcon()
 			}
 
@@ -742,7 +802,6 @@ func newReaderPane(
 	attachments, showAttachments := newReaderAttachments(
 		parent,
 		store,
-		folder,
 	)
 
 	clearSelection := func() {
@@ -801,6 +860,20 @@ func newReaderPane(
 				}
 
 				selected = updated
+
+				if onUpdated != nil {
+					onUpdated(updated)
+				}
+
+				if view.isStarred() && !updated.Starred {
+					clearSelection()
+
+					if onRemoved != nil {
+						onRemoved()
+					}
+					return
+				}
+
 				starAction.SetIcon(
 					messageStarIcon(updated.Starred),
 				)
@@ -834,7 +907,7 @@ func newReaderPane(
 		go func() {
 			err := archiveOrRestoreMessage(
 				store,
-				folder,
+				msg.Folder,
 				msg.ID,
 			)
 
@@ -885,7 +958,7 @@ func newReaderPane(
 			go func() {
 				err := trashOrDeleteMessage(
 					store,
-					folder,
+					msg.Folder,
 					msg.ID,
 				)
 
@@ -912,7 +985,7 @@ func newReaderPane(
 			}()
 		}
 
-		if folder == mailbox.FolderTrash {
+		if msg.Folder == mailbox.FolderTrash {
 			dialog.ShowConfirm(
 				"Delete permanently?",
 				"This message and its attachments will be permanently deleted. This cannot be undone.",

@@ -27,7 +27,6 @@ type attachmentReaderStore interface {
 func newReaderAttachments(
 	parent fyne.Window,
 	store attachmentReaderStore,
-	folder mailbox.Folder,
 ) (fyne.CanvasObject, func(mailbox.Message)) {
 	summary := widget.NewLabel("")
 	rows := container.NewVBox()
@@ -69,8 +68,7 @@ func newReaderAttachments(
 					showAttachmentSaveDialog(
 						parent,
 						store,
-						folder,
-						msg.ID,
+						msg,
 						attachment,
 					)
 				},
@@ -94,18 +92,29 @@ func newReaderAttachments(
 	return section, showMessage
 }
 
+func openAttachmentReaderForMessage(
+	store attachmentReaderStore,
+	msg mailbox.Message,
+	attachmentID string,
+) (io.ReadCloser, mailbox.Attachment, error) {
+	return store.OpenAttachmentReader(
+		msg.Folder,
+		msg.ID,
+		attachmentID,
+	)
+}
+
 func showAttachmentSaveDialog(
 	parent fyne.Window,
 	store attachmentReaderStore,
-	folder mailbox.Folder,
-	messageID string,
+	msg mailbox.Message,
 	attachment mailbox.Attachment,
 ) {
 	go func() {
 		reader, storedAttachment, err :=
-			store.OpenAttachmentReader(
-				folder,
-				messageID,
+			openAttachmentReaderForMessage(
+				store,
+				msg,
 				attachment.ID,
 			)
 
