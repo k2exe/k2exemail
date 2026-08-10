@@ -18,10 +18,18 @@ func newMailShell(
 	a fyne.App,
 	parent fyne.Window,
 	messages mailboxStore,
-	callsign string,
-	locator string,
+	identity IdentityFunc,
+	updateIdentity IdentityUpdateFunc,
 	connectCMS CMSConnectFunc,
 ) (fyne.CanvasObject, error) {
+	getIdentity := func() (string, string) {
+		if identity == nil {
+			return "", ""
+		}
+
+		return identity()
+	}
+
 	inbox, err := messages.List(mailbox.FolderInbox)
 	if err != nil {
 		return nil, err
@@ -84,6 +92,8 @@ func newMailShell(
 				var onEdit func(mailbox.Message)
 				if folder == mailbox.FolderDrafts {
 					onEdit = func(msg mailbox.Message) {
+						callsign, _ := getIdentity()
+
 						openDraftWindow(
 							a,
 							parent,
@@ -115,12 +125,15 @@ func newMailShell(
 
 	var cmsActive atomic.Bool
 	var connectionsWindow fyne.Window
+	var settingsWindow fyne.Window
 
 	openConnections := func() {
 		if connectionsWindow != nil {
 			connectionsWindow.RequestFocus()
 			return
 		}
+
+		callsign, locator := getIdentity()
 
 		connectionsWindow = newConnectionsWindow(
 			a,
@@ -139,8 +152,31 @@ func newMailShell(
 		connectionsWindow.Show()
 	}
 
+	openSettings := func() {
+		if settingsWindow != nil {
+			settingsWindow.RequestFocus()
+			return
+		}
+
+		callsign, locator := getIdentity()
+
+		settingsWindow = newSettingsWindow(
+			a,
+			callsign,
+			locator,
+			updateIdentity,
+			func() {
+				settingsWindow = nil
+			},
+		)
+
+		settingsWindow.Show()
+	}
+
 	sidebar := newSidebar(
 		func() {
+			callsign, _ := getIdentity()
+
 			openComposeWindow(
 				a,
 				parent,
@@ -153,6 +189,7 @@ func newMailShell(
 		},
 		switchFolder,
 		openConnections,
+		openSettings,
 	)
 
 	shell := container.NewHSplit(sidebar, content)
@@ -165,6 +202,7 @@ func newSidebar(
 	onCompose func(),
 	onFolder func(mailbox.Folder),
 	onConnections func(),
+	onSettings func(),
 ) fyne.CanvasObject {
 	compose := widget.NewButtonWithIcon(
 		"Compose",
@@ -220,7 +258,11 @@ func newSidebar(
 		navButton("Contacts", nil, nil),
 		navButton("RMS List", nil, nil),
 		navButton("Activity", theme.HistoryIcon(), nil),
-		navButton("Settings", theme.SettingsIcon(), nil),
+		navButton(
+			"Settings",
+			theme.SettingsIcon(),
+			onSettings,
+		),
 	)
 
 	return container.NewBorder(
