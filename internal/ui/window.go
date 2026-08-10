@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"io"
+
 	"fyne.io/fyne/v2"
 
 	"github.com/k2exe/k2exemail/internal/mailbox"
@@ -10,6 +12,19 @@ type mailboxStore interface {
 	List(folder mailbox.Folder) ([]mailbox.Message, error)
 	Save(msg mailbox.Message) error
 	Move(from, to mailbox.Folder, id string) error
+
+	AddAttachmentReader(
+		folder mailbox.Folder,
+		messageID string,
+		name string,
+		source io.Reader,
+	) (mailbox.Attachment, error)
+
+	RemoveAttachment(
+		folder mailbox.Folder,
+		messageID string,
+		attachmentID string,
+	) error
 }
 
 type IdentityFunc func() (

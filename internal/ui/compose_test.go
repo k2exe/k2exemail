@@ -142,3 +142,83 @@ func TestComposeSnapshotPreservesDraftIdentity(t *testing.T) {
 		t.Fatalf("Body = %q", got.Body)
 	}
 }
+
+func TestFormatAttachmentSize(t *testing.T) {
+	tests := []struct {
+		size int64
+		want string
+	}{
+		{0, "0 B"},
+		{512, "512 B"},
+		{1024, "1.0 KiB"},
+		{1536, "1.5 KiB"},
+		{2 * 1024 * 1024, "2.0 MiB"},
+	}
+
+	for _, tt := range tests {
+		if got := formatAttachmentSize(tt.size); got != tt.want {
+			t.Fatalf(
+				"formatAttachmentSize(%d) = %q, want %q",
+				tt.size,
+				got,
+				tt.want,
+			)
+		}
+	}
+}
+
+func TestAttachmentSummaryText(t *testing.T) {
+	if got := attachmentSummaryText(nil); got != "Attachments: none" {
+		t.Fatalf("empty summary = %q", got)
+	}
+
+	got := attachmentSummaryText(
+		[]mailbox.Attachment{
+			{
+				ID:   "one",
+				Name: "one.txt",
+				Size: 1024,
+			},
+			{
+				ID:   "two",
+				Name: "two.txt",
+				Size: 512,
+			},
+		},
+	)
+
+	want := "Attachments: 2 attachments · 1.5 KiB total"
+	if got != want {
+		t.Fatalf(
+			"attachment summary = %q, want %q",
+			got,
+			want,
+		)
+	}
+}
+
+func TestAttachmentsWithout(t *testing.T) {
+	attachments := []mailbox.Attachment{
+		{ID: "one", Name: "one.txt"},
+		{ID: "two", Name: "two.txt"},
+	}
+
+	got := attachmentsWithout(
+		attachments,
+		"one",
+	)
+
+	if len(got) != 1 {
+		t.Fatalf(
+			"attachment count = %d, want 1",
+			len(got),
+		)
+	}
+
+	if got[0].ID != "two" {
+		t.Fatalf(
+			"remaining attachment = %q, want two",
+			got[0].ID,
+		)
+	}
+}
