@@ -186,20 +186,9 @@ func (s *Store) Move(from, to Folder, id string) error {
 		)
 	}
 
-	msg, err := s.Load(to, id)
-	if err != nil {
-		return err
-	}
-
-	msg.Folder = to
-	if err := s.Save(msg); err != nil {
-		return fmt.Errorf(
-			"update moved message %q metadata: %w",
-			id,
-			err,
-		)
-	}
-
+	// The directory location is authoritative, so a successful rename
+	// completes the move. Avoid a second metadata write that could fail
+	// after the message has already changed folders.
 	return nil
 }
 
