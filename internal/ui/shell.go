@@ -492,17 +492,10 @@ func newMessagePane(
 		list.UnselectAll()
 		list.Refresh()
 
-		if len(filtered) == 0 {
-			if clearMessage != nil {
-				clearMessage()
-			}
-			return
+		if clearMessage != nil {
+			clearMessage()
 		}
-
-		list.Select(0)
 	}
-
-	list.Select(0)
 
 	updateMessage := func(updated mailbox.Message) {
 		replaceMessageSnapshot(messages, updated)
