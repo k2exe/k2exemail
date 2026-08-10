@@ -35,11 +35,22 @@ func newMailShell(
 		return nil, err
 	}
 
+	currentFolder := mailbox.FolderInbox
+	var switchFolder func(mailbox.Folder)
+	activity := &mailboxActivityGate{}
+
 	reader, showMessage := newReaderPane(
 		parent,
 		messages,
 		mailbox.FolderInbox,
 		nil,
+		activity,
+		func() {
+			if switchFolder != nil &&
+				currentFolder == mailbox.FolderInbox {
+				switchFolder(mailbox.FolderInbox)
+			}
+		},
 	)
 
 	messagePane := newMessagePane(
@@ -52,9 +63,7 @@ func newMailShell(
 	content.SetOffset(0.38)
 
 	var loadGeneration atomic.Uint64
-	currentFolder := mailbox.FolderInbox
 
-	var switchFolder func(mailbox.Folder)
 	switchFolder = func(folder mailbox.Folder) {
 		currentFolder = folder
 		request := loadGeneration.Add(1)
@@ -114,6 +123,12 @@ func newMailShell(
 					messages,
 					folder,
 					onEdit,
+					activity,
+					func() {
+						if currentFolder == folder {
+							switchFolder(folder)
+						}
+					},
 				)
 
 				content.Leading = newMessagePane(
@@ -127,7 +142,6 @@ func newMailShell(
 		}()
 	}
 
-	var cmsActive atomic.Bool
 	var connectionsWindow fyne.Window
 	var settingsWindow fyne.Window
 
@@ -144,7 +158,7 @@ func newMailShell(
 			callsign,
 			locator,
 			connectCMS,
-			&cmsActive,
+			activity,
 			func() {
 				switchFolder(currentFolder)
 			},
@@ -458,10 +472,24 @@ func newReaderPane(
 	store mailboxStore,
 	folder mailbox.Folder,
 	onEdit func(mailbox.Message),
+	activity *mailboxActivityGate,
+	onRemoved func(),
 ) (fyne.CanvasObject, func(mailbox.Message)) {
 	var selected mailbox.Message
 	var hasSelection bool
+	var removing bool
 	var editAction *widget.ToolbarAction
+	var removeSelected func()
+
+	deleteAction := widget.NewToolbarAction(
+		theme.DeleteIcon(),
+		func() {
+			if removeSelected != nil {
+				removeSelected()
+			}
+		},
+	)
+	deleteAction.Disable()
 
 	var toolbar *widget.Toolbar
 
@@ -469,7 +497,7 @@ func newReaderPane(
 		editAction = widget.NewToolbarAction(
 			theme.DocumentCreateIcon(),
 			func() {
-				if hasSelection {
+				if hasSelection && !removing {
 					onEdit(selected)
 				}
 			},
@@ -479,10 +507,7 @@ func newReaderPane(
 		toolbar = widget.NewToolbar(
 			editAction,
 			widget.NewToolbarSeparator(),
-			widget.NewToolbarAction(
-				theme.DeleteIcon(),
-				func() {},
-			),
+			deleteAction,
 		)
 	} else {
 		toolbar = widget.NewToolbar(
@@ -499,10 +524,7 @@ func newReaderPane(
 				func() {},
 			),
 			widget.NewToolbarSeparator(),
-			widget.NewToolbarAction(
-				theme.DeleteIcon(),
-				func() {},
-			),
+			deleteAction,
 		)
 	}
 
@@ -526,6 +548,98 @@ func newReaderPane(
 		folder,
 	)
 
+	clearSelection := func() {
+		selected = mailbox.Message{}
+		hasSelection = false
+
+		deleteAction.Disable()
+		if editAction != nil {
+			editAction.Disable()
+		}
+
+		subject.SetText("")
+		from.SetText("")
+		to.SetText("")
+		body.SetText("")
+		showAttachments(mailbox.Message{})
+	}
+
+	removeSelected = func() {
+		if !hasSelection || removing {
+			return
+		}
+
+		msg := selected
+
+		remove := func() {
+			if activity != nil &&
+				!activity.beginMutation() {
+				dialog.ShowInformation(
+					"Mailbox busy",
+					"Messages cannot be moved or deleted while a CMS session or another mailbox update is active.",
+					parent,
+				)
+				return
+			}
+
+			removing = true
+			deleteAction.Disable()
+			if editAction != nil {
+				editAction.Disable()
+			}
+
+			go func() {
+				err := trashOrDeleteMessage(
+					store,
+					folder,
+					msg.ID,
+				)
+
+				if activity != nil {
+					activity.endMutation()
+				}
+
+				fyne.Do(func() {
+					removing = false
+
+					if err != nil {
+						if hasSelection {
+							deleteAction.Enable()
+							if editAction != nil {
+								editAction.Enable()
+							}
+						}
+
+						dialog.ShowError(err, parent)
+						return
+					}
+
+					clearSelection()
+
+					if onRemoved != nil {
+						onRemoved()
+					}
+				})
+			}()
+		}
+
+		if folder == mailbox.FolderTrash {
+			dialog.ShowConfirm(
+				"Delete permanently?",
+				"This message and its attachments will be permanently deleted. This cannot be undone.",
+				func(ok bool) {
+					if ok {
+						remove()
+					}
+				},
+				parent,
+			)
+			return
+		}
+
+		remove()
+	}
+
 	message := container.NewVBox(
 		subject,
 		from,
@@ -539,8 +653,11 @@ func newReaderPane(
 		selected = msg
 		hasSelection = true
 
-		if editAction != nil {
-			editAction.Enable()
+		if !removing {
+			deleteAction.Enable()
+			if editAction != nil {
+				editAction.Enable()
+			}
 		}
 
 		subject.SetText(msg.Subject)
