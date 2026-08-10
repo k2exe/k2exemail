@@ -18,6 +18,7 @@ func openComposeWindow(
 	a fyne.App,
 	parent fyne.Window,
 	store mailboxStore,
+	onChanged func(),
 ) {
 	draft, err := mailbox.NewDraft()
 	if err != nil {
@@ -25,20 +26,72 @@ func openComposeWindow(
 		return
 	}
 
-	w := a.NewWindow("New Message — K2EXEmail")
+	openComposeMessage(
+		a,
+		parent,
+		store,
+		draft,
+		false,
+		onChanged,
+	)
+}
+
+func openDraftWindow(
+	a fyne.App,
+	parent fyne.Window,
+	store mailboxStore,
+	draft mailbox.Message,
+	onChanged func(),
+) {
+	if draft.Folder != mailbox.FolderDrafts {
+		dialog.ShowError(
+			fmt.Errorf("message %q is not a draft", draft.ID),
+			parent,
+		)
+		return
+	}
+
+	openComposeMessage(
+		a,
+		parent,
+		store,
+		draft,
+		true,
+		onChanged,
+	)
+}
+
+func openComposeMessage(
+	a fyne.App,
+	parent fyne.Window,
+	store mailboxStore,
+	draft mailbox.Message,
+	persisted bool,
+	onChanged func(),
+) {
+	title := "New Message — K2EXEmail"
+	if persisted {
+		title = "Edit Draft — K2EXEmail"
+	}
+
+	w := a.NewWindow(title)
 	w.Resize(fyne.NewSize(800, 650))
 
 	to := widget.NewEntry()
 	to.SetPlaceHolder("Callsign or email address")
+	to.SetText(strings.Join(draft.To, ", "))
 
 	cc := widget.NewEntry()
 	cc.SetPlaceHolder("Optional")
+	cc.SetText(strings.Join(draft.Cc, ", "))
 
 	subject := widget.NewEntry()
 	subject.SetPlaceHolder("Subject")
+	subject.SetText(draft.Subject)
 
 	body := widget.NewMultiLineEntry()
 	body.SetPlaceHolder("Write your message")
+	body.SetText(draft.Body)
 
 	header := widget.NewForm(
 		widget.NewFormItem("To", to),
@@ -51,7 +104,7 @@ func openComposeWindow(
 	var busy bool
 
 	saveButton := widget.NewButtonWithIcon(
-		"Save Draft",
+		"Save & Close",
 		theme.DocumentSaveIcon(),
 		nil,
 	)
@@ -76,20 +129,25 @@ func openComposeWindow(
 	}
 
 	snapshot := func() mailbox.Message {
-		msg := draft
-
-		msg.To = splitRecipients(to.Text)
-		msg.Cc = splitRecipients(cc.Text)
-		msg.Subject = strings.TrimSpace(subject.Text)
-		msg.Body = body.Text
-		msg.UpdatedAt = time.Now().UTC()
-
-		return msg
+		return composeSnapshot(
+			draft,
+			to.Text,
+			cc.Text,
+			subject.Text,
+			body.Text,
+			time.Now().UTC(),
+		)
 	}
 
 	closeWindow := func() {
 		w.SetCloseIntercept(nil)
 		w.Close()
+	}
+
+	notifyChanged := func() {
+		if onChanged != nil {
+			onChanged()
+		}
 	}
 
 	saveDraft := func(closeAfter bool) {
@@ -99,7 +157,9 @@ func openComposeWindow(
 
 		msg := snapshot()
 
-		if closeAfter && !messageHasContent(msg) {
+		// A brand-new untouched compose window should not create an
+		// empty draft just because the user closed it.
+		if closeAfter && !persisted && !messageHasContent(msg) {
 			closeWindow()
 			return
 		}
@@ -122,6 +182,8 @@ func openComposeWindow(
 				}
 
 				draft = msg
+				persisted = true
+				notifyChanged()
 
 				if closeAfter {
 					closeWindow()
@@ -135,7 +197,7 @@ func openComposeWindow(
 	}
 
 	saveButton.OnTapped = func() {
-		saveDraft(false)
+		saveDraft(true)
 	}
 
 	queueButton.OnTapped = func() {
@@ -174,6 +236,7 @@ func openComposeWindow(
 					return
 				}
 
+				notifyChanged()
 				closeWindow()
 
 				dialog.ShowInformation(
@@ -214,6 +277,24 @@ func openComposeWindow(
 	)
 
 	w.Show()
+}
+
+func composeSnapshot(
+	base mailbox.Message,
+	to string,
+	cc string,
+	subject string,
+	body string,
+	updatedAt time.Time,
+) mailbox.Message {
+	base.Folder = mailbox.FolderDrafts
+	base.To = splitRecipients(to)
+	base.Cc = splitRecipients(cc)
+	base.Subject = strings.TrimSpace(subject)
+	base.Body = body
+	base.UpdatedAt = updatedAt
+
+	return base
 }
 
 func splitRecipients(value string) []string {

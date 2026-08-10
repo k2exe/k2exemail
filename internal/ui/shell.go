@@ -24,7 +24,10 @@ func newMailShell(
 		return nil, err
 	}
 
-	reader, showMessage := newReaderPane()
+	reader, showMessage := newReaderPane(
+		mailbox.FolderInbox,
+		nil,
+	)
 
 	messagePane := newMessagePane(
 		mailbox.FolderInbox,
@@ -36,8 +39,11 @@ func newMailShell(
 	content.SetOffset(0.38)
 
 	var loadGeneration atomic.Uint64
+	currentFolder := mailbox.FolderInbox
 
-	switchFolder := func(folder mailbox.Folder) {
+	var switchFolder func(mailbox.Folder)
+	switchFolder = func(folder mailbox.Folder) {
+		currentFolder = folder
 		request := loadGeneration.Add(1)
 
 		content.Leading = newFolderStatusPane(
@@ -72,7 +78,25 @@ func newMailShell(
 					return
 				}
 
-				nextReader, nextShowMessage := newReaderPane()
+				var onEdit func(mailbox.Message)
+				if folder == mailbox.FolderDrafts {
+					onEdit = func(msg mailbox.Message) {
+						openDraftWindow(
+							a,
+							parent,
+							messages,
+							msg,
+							func() {
+								switchFolder(currentFolder)
+							},
+						)
+					}
+				}
+
+				nextReader, nextShowMessage := newReaderPane(
+					folder,
+					onEdit,
+				)
 
 				content.Leading = newMessagePane(
 					folder,
@@ -87,7 +111,14 @@ func newMailShell(
 
 	sidebar := newSidebar(
 		func() {
-			openComposeWindow(a, parent, messages)
+			openComposeWindow(
+				a,
+				parent,
+				messages,
+				func() {
+					switchFolder(currentFolder)
+				},
+			)
 		},
 		switchFolder,
 	)
@@ -339,14 +370,56 @@ func messageListPrimary(
 	}
 }
 
-func newReaderPane() (fyne.CanvasObject, func(mailbox.Message)) {
-	toolbar := widget.NewToolbar(
-		widget.NewToolbarAction(theme.MailReplyIcon(), func() {}),
-		widget.NewToolbarAction(theme.MailReplyAllIcon(), func() {}),
-		widget.NewToolbarAction(theme.MailForwardIcon(), func() {}),
-		widget.NewToolbarSeparator(),
-		widget.NewToolbarAction(theme.DeleteIcon(), func() {}),
-	)
+func newReaderPane(
+	folder mailbox.Folder,
+	onEdit func(mailbox.Message),
+) (fyne.CanvasObject, func(mailbox.Message)) {
+	var selected mailbox.Message
+	var hasSelection bool
+	var editAction *widget.ToolbarAction
+
+	var toolbar *widget.Toolbar
+
+	if folder == mailbox.FolderDrafts && onEdit != nil {
+		editAction = widget.NewToolbarAction(
+			theme.DocumentCreateIcon(),
+			func() {
+				if hasSelection {
+					onEdit(selected)
+				}
+			},
+		)
+		editAction.Disable()
+
+		toolbar = widget.NewToolbar(
+			editAction,
+			widget.NewToolbarSeparator(),
+			widget.NewToolbarAction(
+				theme.DeleteIcon(),
+				func() {},
+			),
+		)
+	} else {
+		toolbar = widget.NewToolbar(
+			widget.NewToolbarAction(
+				theme.MailReplyIcon(),
+				func() {},
+			),
+			widget.NewToolbarAction(
+				theme.MailReplyAllIcon(),
+				func() {},
+			),
+			widget.NewToolbarAction(
+				theme.MailForwardIcon(),
+				func() {},
+			),
+			widget.NewToolbarSeparator(),
+			widget.NewToolbarAction(
+				theme.DeleteIcon(),
+				func() {},
+			),
+		)
+	}
 
 	subject := widget.NewLabelWithStyle(
 		"",
@@ -371,6 +444,13 @@ func newReaderPane() (fyne.CanvasObject, func(mailbox.Message)) {
 	)
 
 	showMessage := func(msg mailbox.Message) {
+		selected = msg
+		hasSelection = true
+
+		if editAction != nil {
+			editAction.Enable()
+		}
+
 		subject.SetText(msg.Subject)
 		from.SetText("From: " + msg.From)
 		to.SetText("To: " + strings.Join(msg.To, ", "))

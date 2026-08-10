@@ -2,6 +2,7 @@ package ui
 
 import (
 	"testing"
+	"time"
 
 	"github.com/k2exe/k2exemail/internal/mailbox"
 )
@@ -75,5 +76,64 @@ func TestValidateQueueMessage(t *testing.T) {
 				t.Fatal("expected validation error")
 			}
 		})
+	}
+}
+
+func TestComposeSnapshotPreservesDraftIdentity(t *testing.T) {
+	created := time.Date(
+		2026, 8, 10, 1, 0, 0, 0, time.UTC,
+	)
+	updated := created.Add(time.Minute)
+
+	base := mailbox.Message{
+		ID:        "draft-1",
+		Folder:    mailbox.FolderDrafts,
+		CreatedAt: created,
+		Attachments: []mailbox.Attachment{
+			{
+				ID:   "attachment-1",
+				Name: "field-notes.txt",
+			},
+		},
+	}
+
+	got := composeSnapshot(
+		base,
+		"W2ABC; W3XYZ",
+		"KR2SSY",
+		" Updated subject ",
+		"Updated body",
+		updated,
+	)
+
+	if got.ID != base.ID {
+		t.Fatalf("ID = %q, want %q", got.ID, base.ID)
+	}
+
+	if !got.CreatedAt.Equal(created) {
+		t.Fatalf("CreatedAt changed")
+	}
+
+	if !got.UpdatedAt.Equal(updated) {
+		t.Fatalf("UpdatedAt = %v, want %v", got.UpdatedAt, updated)
+	}
+
+	if len(got.Attachments) != 1 ||
+		got.Attachments[0].ID != "attachment-1" {
+		t.Fatal("existing attachment was not preserved")
+	}
+
+	if len(got.To) != 2 ||
+		got.To[0] != "W2ABC" ||
+		got.To[1] != "W3XYZ" {
+		t.Fatalf("To = %#v", got.To)
+	}
+
+	if got.Subject != "Updated subject" {
+		t.Fatalf("Subject = %q", got.Subject)
+	}
+
+	if got.Body != "Updated body" {
+		t.Fatalf("Body = %q", got.Body)
 	}
 }
