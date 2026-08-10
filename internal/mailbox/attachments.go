@@ -128,6 +128,69 @@ func (s *Store) AddAttachment(
 	return attachment, nil
 }
 
+func (s *Store) RemoveAttachment(
+	folder Folder,
+	messageID string,
+	attachmentID string,
+) error {
+	if err := validateAttachmentID(attachmentID); err != nil {
+		return err
+	}
+
+	msg, err := s.Load(folder, messageID)
+	if err != nil {
+		return fmt.Errorf("load message for attachment removal: %w", err)
+	}
+
+	index := -1
+	var attachment Attachment
+
+	for i, candidate := range msg.Attachments {
+		if candidate.ID == attachmentID {
+			index = i
+			attachment = candidate
+			break
+		}
+	}
+
+	if index == -1 {
+		return fmt.Errorf(
+			"attachment %q not found in message %q",
+			attachmentID,
+			messageID,
+		)
+	}
+
+	updated := make([]Attachment, 0, len(msg.Attachments)-1)
+	updated = append(updated, msg.Attachments[:index]...)
+	updated = append(updated, msg.Attachments[index+1:]...)
+	msg.Attachments = updated
+
+	// Persist the metadata change before deleting the stored content.
+	// If cleanup is interrupted, this can leave an orphaned directory,
+	// but it cannot leave the message referencing a deleted attachment.
+	if err := s.Save(msg); err != nil {
+		return fmt.Errorf(
+			"save attachment removal for message %q: %w",
+			messageID,
+			err,
+		)
+	}
+
+	if err := os.RemoveAll(
+		s.attachmentDirPath(folder, messageID, attachmentID),
+	); err != nil {
+		return fmt.Errorf(
+			"attachment %q removed from message %q but stored data cleanup failed: %w",
+			attachment.Name,
+			messageID,
+			err,
+		)
+	}
+
+	return nil
+}
+
 func (s *Store) OpenAttachment(
 	folder Folder,
 	messageID string,
