@@ -78,7 +78,7 @@ func newMailShell(
 		)
 	}
 
-	reader, showMessage := newReaderPane(
+	reader, showMessage, clearMessage := newReaderPane(
 		parent,
 		messages,
 		mailbox.FolderInbox,
@@ -98,6 +98,7 @@ func newMailShell(
 		mailbox.FolderInbox,
 		inbox,
 		showMessage,
+		clearMessage,
 	)
 
 	content := container.NewHSplit(messagePane, reader)
@@ -159,7 +160,7 @@ func newMailShell(
 					}
 				}
 
-				nextReader, nextShowMessage := newReaderPane(
+				nextReader, nextShowMessage, nextClearMessage := newReaderPane(
 					parent,
 					messages,
 					folder,
@@ -178,6 +179,7 @@ func newMailShell(
 					folder,
 					loaded,
 					nextShowMessage,
+					nextClearMessage,
 				)
 				content.Trailing = nextReader
 				content.Refresh()
@@ -366,6 +368,7 @@ func newMessagePane(
 	folder mailbox.Folder,
 	messages []mailbox.Message,
 	showMessage func(mailbox.Message),
+	clearMessage func(),
 ) fyne.CanvasObject {
 	titleText := folderTitle(folder)
 
@@ -393,9 +396,11 @@ func newMessagePane(
 		)
 	}
 
+	filtered := messages
+
 	list := widget.NewList(
 		func() int {
-			return len(messages)
+			return len(filtered)
 		},
 		func() fyne.CanvasObject {
 			primary := widget.NewLabelWithStyle(
@@ -416,7 +421,7 @@ func newMessagePane(
 			)
 		},
 		func(id widget.ListItemID, object fyne.CanvasObject) {
-			message := messages[id]
+			message := filtered[id]
 			row := object.(*fyne.Container)
 
 			row.Objects[0].(*widget.Label).SetText(
@@ -432,7 +437,30 @@ func newMessagePane(
 	)
 
 	list.OnSelected = func(id widget.ListItemID) {
-		showMessage(messages[id])
+		if id < 0 || id >= len(filtered) {
+			return
+		}
+
+		showMessage(filtered[id])
+	}
+
+	search.OnChanged = func(query string) {
+		filtered = filterMessages(
+			messages,
+			query,
+		)
+
+		list.UnselectAll()
+		list.Refresh()
+
+		if len(filtered) == 0 {
+			if clearMessage != nil {
+				clearMessage()
+			}
+			return
+		}
+
+		list.Select(0)
 	}
 
 	list.Select(0)
@@ -519,7 +547,11 @@ func newReaderPane(
 	onForward func(mailbox.Message),
 	activity *mailboxActivityGate,
 	onRemoved func(),
-) (fyne.CanvasObject, func(mailbox.Message)) {
+) (
+	fyne.CanvasObject,
+	func(mailbox.Message),
+	func(),
+) {
 	var selected mailbox.Message
 	var hasSelection bool
 	var removing bool
@@ -792,7 +824,7 @@ func newReaderPane(
 		container.NewVScroll(message),
 	)
 
-	return reader, showMessage
+	return reader, showMessage, clearSelection
 }
 
 func messageSnippet(body string) string {
