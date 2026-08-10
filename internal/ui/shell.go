@@ -1,10 +1,13 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
+	"sync/atomic"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -23,13 +26,71 @@ func newMailShell(
 
 	reader, showMessage := newReaderPane()
 
-	sidebar := newSidebar(func() {
-		openComposeWindow(a, parent, messages)
-	})
-	messagePane := newMessagePane(inbox, showMessage)
+	messagePane := newMessagePane(
+		mailbox.FolderInbox,
+		inbox,
+		showMessage,
+	)
 
 	content := container.NewHSplit(messagePane, reader)
 	content.SetOffset(0.38)
+
+	var loadGeneration atomic.Uint64
+
+	switchFolder := func(folder mailbox.Folder) {
+		request := loadGeneration.Add(1)
+
+		content.Leading = newFolderStatusPane(
+			folder,
+			"Loading...",
+		)
+		content.Refresh()
+
+		go func() {
+			loaded, err := messages.List(folder)
+
+			fyne.Do(func() {
+				if request != loadGeneration.Load() {
+					return
+				}
+
+				if err != nil {
+					content.Leading = newFolderStatusPane(
+						folder,
+						"Unable to load messages",
+					)
+					content.Refresh()
+
+					dialog.ShowError(
+						fmt.Errorf(
+							"load %s: %w",
+							folderTitle(folder),
+							err,
+						),
+						parent,
+					)
+					return
+				}
+
+				nextReader, nextShowMessage := newReaderPane()
+
+				content.Leading = newMessagePane(
+					folder,
+					loaded,
+					nextShowMessage,
+				)
+				content.Trailing = nextReader
+				content.Refresh()
+			})
+		}()
+	}
+
+	sidebar := newSidebar(
+		func() {
+			openComposeWindow(a, parent, messages)
+		},
+		switchFolder,
+	)
 
 	shell := container.NewHSplit(sidebar, content)
 	shell.SetOffset(0.18)
@@ -37,7 +98,10 @@ func newMailShell(
 	return shell, nil
 }
 
-func newSidebar(onCompose func()) fyne.CanvasObject {
+func newSidebar(
+	onCompose func(),
+	onFolder func(mailbox.Folder),
+) fyne.CanvasObject {
 	compose := widget.NewButtonWithIcon(
 		"Compose",
 		theme.MailComposeIcon(),
@@ -47,20 +111,48 @@ func newSidebar(onCompose func()) fyne.CanvasObject {
 	compose.Alignment = widget.ButtonAlignLeading
 
 	items := container.NewVBox(
-		navButton("Inbox", theme.FolderOpenIcon()),
-		navButton("Starred", nil),
-		navButton("Drafts", theme.DocumentCreateIcon()),
-		navButton("Outbox", theme.MailSendIcon()),
-		navButton("Sent", theme.MailSendIcon()),
-		navButton("Archive", theme.FolderIcon()),
-		navButton("Spam", theme.WarningIcon()),
-		navButton("Trash", theme.DeleteIcon()),
+		navButton(
+			"Inbox",
+			theme.FolderOpenIcon(),
+			func() { onFolder(mailbox.FolderInbox) },
+		),
+		navButton("Starred", nil, nil),
+		navButton(
+			"Drafts",
+			theme.DocumentCreateIcon(),
+			func() { onFolder(mailbox.FolderDrafts) },
+		),
+		navButton(
+			"Outbox",
+			theme.MailSendIcon(),
+			func() { onFolder(mailbox.FolderOutbox) },
+		),
+		navButton(
+			"Sent",
+			theme.MailSendIcon(),
+			func() { onFolder(mailbox.FolderSent) },
+		),
+		navButton(
+			"Archive",
+			theme.FolderIcon(),
+			func() { onFolder(mailbox.FolderArchive) },
+		),
+		navButton(
+			"Spam",
+			theme.WarningIcon(),
+			func() { onFolder(mailbox.FolderSpam) },
+		),
+		navButton(
+			"Trash",
+			theme.DeleteIcon(),
+			func() { onFolder(mailbox.FolderTrash) },
+		),
 		widget.NewSeparator(),
-		navButton("Connections", theme.FolderIcon()),
-		navButton("Contacts", nil),
-		navButton("RMS List", nil),
-		navButton("Activity", theme.HistoryIcon()),
-		navButton("Settings", theme.SettingsIcon()),
+		navButton("Connections", theme.FolderIcon(), nil),
+		navButton("Contacts", nil, nil),
+		navButton("RMS List", nil, nil),
+		navButton("Activity", theme.HistoryIcon(), nil),
+		navButton("Settings", theme.SettingsIcon(), nil),
 	)
 
 	return container.NewBorder(
@@ -72,13 +164,25 @@ func newSidebar(onCompose func()) fyne.CanvasObject {
 	)
 }
 
-func navButton(label string, icon fyne.Resource) *widget.Button {
+func navButton(
+	label string,
+	icon fyne.Resource,
+	onTapped func(),
+) *widget.Button {
+	if onTapped == nil {
+		onTapped = func() {}
+	}
+
 	var button *widget.Button
 
 	if icon == nil {
-		button = widget.NewButton(label, func() {})
+		button = widget.NewButton(label, onTapped)
 	} else {
-		button = widget.NewButtonWithIcon(label, icon, func() {})
+		button = widget.NewButtonWithIcon(
+			label,
+			icon,
+			onTapped,
+		)
 	}
 
 	button.Alignment = widget.ButtonAlignLeading
@@ -88,11 +192,14 @@ func navButton(label string, icon fyne.Resource) *widget.Button {
 }
 
 func newMessagePane(
+	folder mailbox.Folder,
 	messages []mailbox.Message,
 	showMessage func(mailbox.Message),
 ) fyne.CanvasObject {
+	titleText := folderTitle(folder)
+
 	title := widget.NewLabelWithStyle(
-		"Inbox",
+		titleText,
 		fyne.TextAlignLeading,
 		fyne.TextStyle{Bold: true},
 	)
@@ -101,7 +208,9 @@ func newMessagePane(
 	search.SetPlaceHolder("Search mail")
 
 	if len(messages) == 0 {
-		empty := widget.NewLabel("No messages in Inbox")
+		empty := widget.NewLabel(
+			"No messages in " + titleText,
+		)
 		empty.Alignment = fyne.TextAlignCenter
 
 		return container.NewBorder(
@@ -118,7 +227,7 @@ func newMessagePane(
 			return len(messages)
 		},
 		func() fyne.CanvasObject {
-			sender := widget.NewLabelWithStyle(
+			primary := widget.NewLabelWithStyle(
 				"Sender",
 				fyne.TextAlignLeading,
 				fyne.TextStyle{Bold: true},
@@ -129,15 +238,25 @@ func newMessagePane(
 			snippet := widget.NewLabel("Message preview")
 			snippet.Truncation = fyne.TextTruncateEllipsis
 
-			return container.NewVBox(sender, subject, snippet)
+			return container.NewVBox(
+				primary,
+				subject,
+				snippet,
+			)
 		},
 		func(id widget.ListItemID, object fyne.CanvasObject) {
 			message := messages[id]
 			row := object.(*fyne.Container)
 
-			row.Objects[0].(*widget.Label).SetText(message.From)
-			row.Objects[1].(*widget.Label).SetText(message.Subject)
-			row.Objects[2].(*widget.Label).SetText(messageSnippet(message.Body))
+			row.Objects[0].(*widget.Label).SetText(
+				messageListPrimary(folder, message),
+			)
+			row.Objects[1].(*widget.Label).SetText(
+				message.Subject,
+			)
+			row.Objects[2].(*widget.Label).SetText(
+				messageSnippet(message.Body),
+			)
 		},
 	)
 
@@ -154,6 +273,70 @@ func newMessagePane(
 		nil,
 		list,
 	)
+}
+
+func newFolderStatusPane(
+	folder mailbox.Folder,
+	status string,
+) fyne.CanvasObject {
+	title := widget.NewLabelWithStyle(
+		folderTitle(folder),
+		fyne.TextAlignLeading,
+		fyne.TextStyle{Bold: true},
+	)
+
+	label := widget.NewLabel(status)
+	label.Alignment = fyne.TextAlignCenter
+
+	return container.NewBorder(
+		title,
+		nil,
+		nil,
+		nil,
+		container.NewCenter(label),
+	)
+}
+
+func folderTitle(folder mailbox.Folder) string {
+	switch folder {
+	case mailbox.FolderInbox:
+		return "Inbox"
+	case mailbox.FolderDrafts:
+		return "Drafts"
+	case mailbox.FolderOutbox:
+		return "Outbox"
+	case mailbox.FolderSent:
+		return "Sent"
+	case mailbox.FolderArchive:
+		return "Archive"
+	case mailbox.FolderSpam:
+		return "Spam"
+	case mailbox.FolderTrash:
+		return "Trash"
+	default:
+		return string(folder)
+	}
+}
+
+func messageListPrimary(
+	folder mailbox.Folder,
+	msg mailbox.Message,
+) string {
+	switch folder {
+	case mailbox.FolderDrafts,
+		mailbox.FolderOutbox,
+		mailbox.FolderSent:
+		if len(msg.To) == 0 {
+			return "To:"
+		}
+		return "To: " + strings.Join(msg.To, ", ")
+
+	default:
+		if sender := strings.TrimSpace(msg.From); sender != "" {
+			return sender
+		}
+		return "(unknown sender)"
+	}
 }
 
 func newReaderPane() (fyne.CanvasObject, func(mailbox.Message)) {

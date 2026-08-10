@@ -1,6 +1,10 @@
 package ui
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/k2exe/k2exemail/internal/mailbox"
+)
 
 func TestMessageSnippet(t *testing.T) {
 	tests := []struct {
@@ -42,5 +46,29 @@ func TestMessageSnippet(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestMessageListPrimary(t *testing.T) {
+	outgoing := mailbox.Message{
+		To: []string{"K2EXE", "KR2SSY"},
+	}
+
+	if got := messageListPrimary(
+		mailbox.FolderOutbox,
+		outgoing,
+	); got != "To: K2EXE, KR2SSY" {
+		t.Fatalf("outbox primary = %q", got)
+	}
+
+	incoming := mailbox.Message{
+		From: "W2ABC",
+	}
+
+	if got := messageListPrimary(
+		mailbox.FolderInbox,
+		incoming,
+	); got != "W2ABC" {
+		t.Fatalf("inbox primary = %q", got)
 	}
 }
