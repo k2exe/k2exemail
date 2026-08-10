@@ -7,7 +7,11 @@ import (
 	"time"
 )
 
-func NewDraft() (Message, error) {
+func NewMessage(folder Folder) (Message, error) {
+	if !folder.Valid() {
+		return Message{}, fmt.Errorf("invalid folder %q", folder)
+	}
+
 	id, err := newLocalMessageID()
 	if err != nil {
 		return Message{}, fmt.Errorf("generate local message ID: %w", err)
@@ -18,10 +22,14 @@ func NewDraft() (Message, error) {
 	return Message{
 		SchemaVersion: CurrentSchemaVersion,
 		ID:            id,
-		Folder:        FolderDrafts,
+		Folder:        folder,
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}, nil
+}
+
+func NewDraft() (Message, error) {
+	return NewMessage(FolderDrafts)
 }
 
 func newLocalMessageID() (string, error) {

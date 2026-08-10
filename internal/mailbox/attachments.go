@@ -1,6 +1,7 @@
 package mailbox
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -22,11 +23,6 @@ func (s *Store) AddAttachment(
 	messageID string,
 	sourcePath string,
 ) (Attachment, error) {
-	msg, err := s.Load(folder, messageID)
-	if err != nil {
-		return Attachment{}, fmt.Errorf("load message for attachment: %w", err)
-	}
-
 	sourcePath = strings.TrimSpace(sourcePath)
 	if sourcePath == "" {
 		return Attachment{}, fmt.Errorf("attachment source path is required")
@@ -47,6 +43,50 @@ func (s *Store) AddAttachment(
 			"attachment source %q is not a regular file",
 			sourcePath,
 		)
+	}
+
+	return s.addAttachment(
+		folder,
+		messageID,
+		info.Name(),
+		source,
+		info.Size(),
+	)
+}
+
+func (s *Store) AddAttachmentData(
+	folder Folder,
+	messageID string,
+	name string,
+	data []byte,
+) (Attachment, error) {
+	return s.addAttachment(
+		folder,
+		messageID,
+		name,
+		bytes.NewReader(data),
+		int64(len(data)),
+	)
+}
+
+func (s *Store) addAttachment(
+	folder Folder,
+	messageID string,
+	name string,
+	source io.Reader,
+	expectedSize int64,
+) (Attachment, error) {
+	msg, err := s.Load(folder, messageID)
+	if err != nil {
+		return Attachment{}, fmt.Errorf("load message for attachment: %w", err)
+	}
+
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return Attachment{}, fmt.Errorf("attachment name is required")
+	}
+	if expectedSize < 0 {
+		return Attachment{}, fmt.Errorf("attachment size cannot be negative")
 	}
 
 	attachmentID, err := newAttachmentID()
@@ -81,11 +121,11 @@ func (s *Store) AddAttachment(
 		return Attachment{}, fmt.Errorf("copy attachment: %w", err)
 	}
 
-	if copied != info.Size() {
+	if copied != expectedSize {
 		return Attachment{}, fmt.Errorf(
 			"attachment size changed while copying: copied %d bytes, expected %d",
 			copied,
-			info.Size(),
+			expectedSize,
 		)
 	}
 
@@ -97,19 +137,19 @@ func (s *Store) AddAttachment(
 	if sourceHash != storedHash {
 		return Attachment{}, fmt.Errorf(
 			"stored attachment verification failed for %q",
-			info.Name(),
+			name,
 		)
 	}
 
 	attachment := Attachment{
 		ID:     attachmentID,
-		Name:   info.Name(),
+		Name:   name,
 		Size:   copied,
 		SHA256: sourceHash,
 	}
 
 	if mediaType := mime.TypeByExtension(
-		filepath.Ext(info.Name()),
+		filepath.Ext(name),
 	); mediaType != "" {
 		attachment.MediaType = mediaType
 	}
