@@ -34,6 +34,7 @@ type Attachment struct {
 	Name      string `json:"name"`
 	MediaType string `json:"media_type,omitempty"`
 	Size      int64  `json:"size"`
+	SHA256    string `json:"sha256,omitempty"`
 }
 
 const CurrentSchemaVersion = 1
