@@ -25,6 +25,12 @@ type mailboxStore interface {
 		messageID string,
 		attachmentID string,
 	) error
+
+	OpenAttachmentReader(
+		folder mailbox.Folder,
+		messageID string,
+		attachmentID string,
+	) (io.ReadCloser, mailbox.Attachment, error)
 }
 
 type IdentityFunc func() (

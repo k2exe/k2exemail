@@ -260,6 +260,18 @@ func (s *Store) RemoveAttachment(
 	return nil
 }
 
+func (s *Store) OpenAttachmentReader(
+	folder Folder,
+	messageID string,
+	attachmentID string,
+) (io.ReadCloser, Attachment, error) {
+	return s.OpenAttachment(
+		folder,
+		messageID,
+		attachmentID,
+	)
+}
+
 func (s *Store) OpenAttachment(
 	folder Folder,
 	messageID string,
