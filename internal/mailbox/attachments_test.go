@@ -1,6 +1,7 @@
 package mailbox
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -352,4 +353,85 @@ func TestStoreRemoveUnknownAttachmentPreservesExistingAttachment(t *testing.T) {
 		t.Fatalf("existing attachment was damaged: %v", err)
 	}
 	_ = file.Close()
+}
+
+func TestStoreAddAttachmentReaderStreamsAndPersists(t *testing.T) {
+	store := newTestStore(t)
+
+	msg := testMessage("message-reader", FolderDrafts)
+	if err := store.Save(msg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	content := []byte("K2EXEmail streamed attachment data")
+
+	attachment, err := store.AddAttachmentReader(
+		FolderDrafts,
+		msg.ID,
+		"streamed.txt",
+		bytes.NewReader(content),
+	)
+	if err != nil {
+		t.Fatalf("AddAttachmentReader() error = %v", err)
+	}
+
+	if attachment.Name != "streamed.txt" {
+		t.Fatalf(
+			"attachment Name = %q, want streamed.txt",
+			attachment.Name,
+		)
+	}
+
+	if attachment.Size != int64(len(content)) {
+		t.Fatalf(
+			"attachment Size = %d, want %d",
+			attachment.Size,
+			len(content),
+		)
+	}
+
+	file, metadata, err := store.OpenAttachment(
+		FolderDrafts,
+		msg.ID,
+		attachment.ID,
+	)
+	if err != nil {
+		t.Fatalf("OpenAttachment() error = %v", err)
+	}
+	defer file.Close()
+
+	got, err := io.ReadAll(file)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+
+	if !bytes.Equal(got, content) {
+		t.Fatalf(
+			"stored content = %q, want %q",
+			got,
+			content,
+		)
+	}
+
+	if metadata.Size != int64(len(content)) {
+		t.Fatalf(
+			"stored metadata Size = %d, want %d",
+			metadata.Size,
+			len(content),
+		)
+	}
+}
+
+func TestStoreAddAttachmentReaderRejectsNilReader(t *testing.T) {
+	store := newTestStore(t)
+
+	_, err := store.AddAttachmentReader(
+		FolderDrafts,
+		"message-1",
+		"missing.txt",
+		nil,
+	)
+	if err == nil {
+		t.Fatal("AddAttachmentReader() expected nil reader error")
+	}
 }

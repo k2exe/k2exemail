@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -107,6 +108,7 @@ func openComposeMessage(
 	status := widget.NewLabel("")
 
 	var busy bool
+	var refreshAttachments func()
 
 	saveButton := widget.NewButtonWithIcon(
 		"Save & Close",
@@ -121,15 +123,27 @@ func openComposeMessage(
 	)
 	queueButton.Importance = widget.HighImportance
 
+	addAttachmentButton := widget.NewButtonWithIcon(
+		"Add Attachment",
+		theme.MailAttachmentIcon(),
+		nil,
+	)
+
 	setBusy := func(value bool) {
 		busy = value
 
 		if value {
 			saveButton.Disable()
 			queueButton.Disable()
+			addAttachmentButton.Disable()
 		} else {
 			saveButton.Enable()
 			queueButton.Enable()
+			addAttachmentButton.Enable()
+		}
+
+		if refreshAttachments != nil {
+			refreshAttachments()
 		}
 	}
 
@@ -155,6 +169,257 @@ func openComposeMessage(
 			onChanged()
 		}
 	}
+
+	attachmentSummary := widget.NewLabel("")
+	attachmentRows := container.NewVBox()
+
+	var removeAttachment func(mailbox.Attachment)
+
+	refreshAttachments = func() {
+		attachmentRows.RemoveAll()
+		attachmentSummary.SetText(
+			attachmentSummaryText(draft.Attachments),
+		)
+
+		for _, attachment := range draft.Attachments {
+			attachment := attachment
+
+			label := widget.NewLabel(
+				fmt.Sprintf(
+					"%s  (%s)",
+					attachment.Name,
+					formatAttachmentSize(attachment.Size),
+				),
+			)
+
+			removeButton := widget.NewButtonWithIcon(
+				"",
+				theme.DeleteIcon(),
+				func() {
+					if removeAttachment != nil {
+						removeAttachment(attachment)
+					}
+				},
+			)
+
+			if busy {
+				removeButton.Disable()
+			}
+
+			row := container.NewBorder(
+				nil,
+				nil,
+				widget.NewIcon(theme.MailAttachmentIcon()),
+				removeButton,
+				label,
+			)
+
+			attachmentRows.Add(row)
+		}
+
+		attachmentRows.Refresh()
+	}
+
+	addAttachmentButton.OnTapped = func() {
+		if busy {
+			return
+		}
+
+		picker := dialog.NewFileOpen(
+			func(reader fyne.URIReadCloser, err error) {
+				if err != nil {
+					dialog.ShowError(
+						fmt.Errorf(
+							"select attachment: %w",
+							err,
+						),
+						w,
+					)
+					return
+				}
+
+				if reader == nil {
+					return
+				}
+
+				name := strings.TrimSpace(
+					reader.URI().Name(),
+				)
+				if name == "" {
+					_ = reader.Close()
+					dialog.ShowError(
+						fmt.Errorf(
+							"selected attachment has no file name",
+						),
+						w,
+					)
+					return
+				}
+
+				msg := snapshot()
+
+				setBusy(true)
+				status.SetText("Adding attachment...")
+
+				go func(
+					reader fyne.URIReadCloser,
+					name string,
+					msg mailbox.Message,
+				) {
+					saved := false
+
+					err := store.Save(msg)
+					if err == nil {
+						saved = true
+					}
+
+					var attachment mailbox.Attachment
+					if err == nil {
+						attachment, err =
+							store.AddAttachmentReader(
+								mailbox.FolderDrafts,
+								msg.ID,
+								name,
+								reader,
+							)
+					}
+
+					_ = reader.Close()
+
+					fyne.Do(func() {
+						if saved {
+							draft = msg
+							persisted = true
+							notifyChanged()
+						}
+
+						if err != nil {
+							setBusy(false)
+							status.SetText(
+								"Attachment not added",
+							)
+							dialog.ShowError(
+								fmt.Errorf(
+									"add attachment: %w",
+									err,
+								),
+								w,
+							)
+							return
+						}
+
+						msg.Attachments = append(
+							msg.Attachments,
+							attachment,
+						)
+
+						draft = msg
+						persisted = true
+
+						setBusy(false)
+						status.SetText(
+							"Attachment added",
+						)
+					})
+				}(reader, name, msg)
+			},
+			w,
+		)
+
+		picker.SetTitleText("Add Attachment")
+		picker.SetConfirmText("Attach")
+		picker.Show()
+	}
+
+	removeAttachment = func(
+		attachment mailbox.Attachment,
+	) {
+		if busy {
+			return
+		}
+
+		msg := snapshot()
+
+		setBusy(true)
+		status.SetText("Removing attachment...")
+
+		go func() {
+			saved := false
+
+			err := store.Save(msg)
+			if err == nil {
+				saved = true
+				err = store.RemoveAttachment(
+					mailbox.FolderDrafts,
+					msg.ID,
+					attachment.ID,
+				)
+			}
+
+			fyne.Do(func() {
+				if saved {
+					draft = msg
+					persisted = true
+					notifyChanged()
+				}
+
+				if err != nil {
+					if errors.Is(
+						err,
+						mailbox.ErrAttachmentCleanup,
+					) {
+						msg.Attachments = attachmentsWithout(
+							msg.Attachments,
+							attachment.ID,
+						)
+						draft = msg
+						persisted = true
+
+						setBusy(false)
+						status.SetText(
+							"Attachment removed; stored data cleanup failed",
+						)
+						dialog.ShowError(
+							fmt.Errorf(
+								"attachment removed, but cleanup failed: %w",
+								err,
+							),
+							w,
+						)
+						return
+					}
+
+					setBusy(false)
+					status.SetText(
+						"Attachment not removed",
+					)
+					dialog.ShowError(
+						fmt.Errorf(
+							"remove attachment: %w",
+							err,
+						),
+						w,
+					)
+					return
+				}
+
+				msg.Attachments = attachmentsWithout(
+					msg.Attachments,
+					attachment.ID,
+				)
+
+				draft = msg
+				persisted = true
+
+				setBusy(false)
+				status.SetText(
+					"Attachment removed",
+				)
+			})
+		}()
+	}
+
+	refreshAttachments()
 
 	saveDraft := func(closeAfter bool) {
 		if busy {
@@ -274,6 +539,14 @@ func openComposeMessage(
 			container.NewVBox(
 				header,
 				widget.NewSeparator(),
+				container.NewBorder(
+					nil,
+					nil,
+					attachmentSummary,
+					addAttachmentButton,
+				),
+				attachmentRows,
+				widget.NewSeparator(),
 			),
 			actions,
 			nil,
@@ -327,6 +600,81 @@ func messageHasContent(msg mailbox.Message) bool {
 		strings.TrimSpace(msg.Subject) != "" ||
 		strings.TrimSpace(msg.Body) != "" ||
 		len(msg.Attachments) > 0
+}
+
+func formatAttachmentSize(size int64) string {
+	if size < 0 {
+		return "unknown size"
+	}
+
+	if size < 1024 {
+		return fmt.Sprintf("%d B", size)
+	}
+
+	units := []string{
+		"KiB",
+		"MiB",
+		"GiB",
+		"TiB",
+	}
+
+	value := float64(size)
+
+	for i, unit := range units {
+		value /= 1024
+
+		if value < 1024 || i == len(units)-1 {
+			return fmt.Sprintf("%.1f %s", value, unit)
+		}
+	}
+
+	return fmt.Sprintf("%d B", size)
+}
+
+func attachmentSummaryText(
+	attachments []mailbox.Attachment,
+) string {
+	if len(attachments) == 0 {
+		return "Attachments: none"
+	}
+
+	var total int64
+	for _, attachment := range attachments {
+		if attachment.Size > 0 {
+			total += attachment.Size
+		}
+	}
+
+	label := "attachments"
+	if len(attachments) == 1 {
+		label = "attachment"
+	}
+
+	return fmt.Sprintf(
+		"Attachments: %d %s · %s total",
+		len(attachments),
+		label,
+		formatAttachmentSize(total),
+	)
+}
+
+func attachmentsWithout(
+	attachments []mailbox.Attachment,
+	id string,
+) []mailbox.Attachment {
+	result := make(
+		[]mailbox.Attachment,
+		0,
+		len(attachments),
+	)
+
+	for _, attachment := range attachments {
+		if attachment.ID != id {
+			result = append(result, attachment)
+		}
+	}
+
+	return result
 }
 
 func validateQueueMessage(msg mailbox.Message) error {

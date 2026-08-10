@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -16,6 +17,12 @@ import (
 const (
 	attachmentsDirName        = "attachments"
 	attachmentContentFileName = "content"
+)
+
+// ErrAttachmentCleanup means attachment metadata was removed successfully,
+// but deleting the stored attachment data failed.
+var ErrAttachmentCleanup = errors.New(
+	"attachment stored data cleanup failed",
 )
 
 func (s *Store) AddAttachment(
@@ -54,6 +61,27 @@ func (s *Store) AddAttachment(
 	)
 }
 
+func (s *Store) AddAttachmentReader(
+	folder Folder,
+	messageID string,
+	name string,
+	source io.Reader,
+) (Attachment, error) {
+	if source == nil {
+		return Attachment{}, fmt.Errorf(
+			"attachment source reader is required",
+		)
+	}
+
+	return s.addAttachment(
+		folder,
+		messageID,
+		name,
+		source,
+		-1,
+	)
+}
+
 func (s *Store) AddAttachmentData(
 	folder Folder,
 	messageID string,
@@ -85,8 +113,8 @@ func (s *Store) addAttachment(
 	if name == "" {
 		return Attachment{}, fmt.Errorf("attachment name is required")
 	}
-	if expectedSize < 0 {
-		return Attachment{}, fmt.Errorf("attachment size cannot be negative")
+	if expectedSize < -1 {
+		return Attachment{}, fmt.Errorf("attachment size cannot be less than -1")
 	}
 
 	attachmentID, err := newAttachmentID()
@@ -121,7 +149,7 @@ func (s *Store) addAttachment(
 		return Attachment{}, fmt.Errorf("copy attachment: %w", err)
 	}
 
-	if copied != expectedSize {
+	if expectedSize >= 0 && copied != expectedSize {
 		return Attachment{}, fmt.Errorf(
 			"attachment size changed while copying: copied %d bytes, expected %d",
 			copied,
@@ -221,7 +249,8 @@ func (s *Store) RemoveAttachment(
 		s.attachmentDirPath(folder, messageID, attachmentID),
 	); err != nil {
 		return fmt.Errorf(
-			"attachment %q removed from message %q but stored data cleanup failed: %w",
+			"%w: attachment %q removed from message %q: %w",
+			ErrAttachmentCleanup,
 			attachment.Name,
 			messageID,
 			err,
