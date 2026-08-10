@@ -443,12 +443,7 @@ func newMessagePane(
 			return len(filtered)
 		},
 		func() fyne.CanvasObject {
-			primary := widget.NewLabelWithStyle(
-				"Sender",
-				fyne.TextAlignLeading,
-				fyne.TextStyle{Bold: true},
-			)
-
+			primary := widget.NewLabel("Sender")
 			subject := widget.NewLabel("Subject")
 
 			snippet := widget.NewLabel("Message preview")
@@ -463,13 +458,17 @@ func newMessagePane(
 		func(id widget.ListItemID, object fyne.CanvasObject) {
 			message := filtered[id]
 			row := object.(*fyne.Container)
+			style := messageListTextStyle(message)
 
-			row.Objects[0].(*widget.Label).SetText(
+			primary := row.Objects[0].(*widget.Label)
+			primary.TextStyle = style
+			primary.SetText(
 				messageListPrimaryForView(view, message),
 			)
-			row.Objects[1].(*widget.Label).SetText(
-				message.Subject,
-			)
+
+			subject := row.Objects[1].(*widget.Label)
+			subject.TextStyle = style
+			subject.SetText(message.Subject)
 			row.Objects[2].(*widget.Label).SetText(
 				messageSnippet(message.Body),
 			)
@@ -518,6 +517,14 @@ func newMessagePane(
 		nil,
 		list,
 	), updateMessage
+}
+
+func messageListTextStyle(
+	msg mailbox.Message,
+) fyne.TextStyle {
+	return fyne.TextStyle{
+		Bold: msg.Unread,
+	}
 }
 
 func messageListPrimaryForView(
@@ -619,8 +626,10 @@ func newReaderPane(
 	var replyAllAction *widget.ToolbarAction
 	var forwardAction *widget.ToolbarAction
 	var starAction *widget.ToolbarAction
+	var readAction *widget.ToolbarAction
 	var archiveAction *widget.ToolbarAction
 	var starSelected func()
+	var toggleReadSelected func()
 	var archiveSelected func()
 	var removeSelected func()
 
@@ -699,12 +708,23 @@ func newReaderPane(
 		)
 		starAction.Disable()
 
+		readAction = widget.NewToolbarAction(
+			messageReadActionIcon(false),
+			func() {
+				if toggleReadSelected != nil {
+					toggleReadSelected()
+				}
+			},
+		)
+		readAction.Disable()
+
 		toolbarItems := []widget.ToolbarItem{
 			replyAction,
 			replyAllAction,
 			forwardAction,
 			widget.NewToolbarSeparator(),
 			starAction,
+			readAction,
 		}
 
 		if !view.isStarred() &&
@@ -753,6 +773,9 @@ func newReaderPane(
 		if starAction != nil {
 			starAction.Disable()
 		}
+		if readAction != nil {
+			readAction.Disable()
+		}
 		if archiveAction != nil {
 			archiveAction.Disable()
 		}
@@ -779,6 +802,9 @@ func newReaderPane(
 		}
 		if starAction != nil {
 			starAction.Enable()
+		}
+		if readAction != nil {
+			readAction.Enable()
 		}
 		if archiveAction != nil {
 			archiveAction.Enable()
@@ -876,6 +902,62 @@ func newReaderPane(
 
 				starAction.SetIcon(
 					messageStarIcon(updated.Starred),
+				)
+				enableActions()
+			})
+		}()
+	}
+
+	toggleReadSelected = func() {
+		if !hasSelection ||
+			mutating ||
+			readAction == nil {
+			return
+		}
+
+		msg := selected
+
+		if activity != nil &&
+			!activity.beginMutation() {
+			dialog.ShowInformation(
+				"Mailbox busy",
+				"Messages cannot be changed while a CMS session or another mailbox update is active.",
+				parent,
+			)
+			return
+		}
+
+		mutating = true
+		disableActions()
+
+		go func() {
+			updated, err := setMessageUnread(
+				store,
+				msg,
+				!msg.Unread,
+			)
+
+			if activity != nil {
+				activity.endMutation()
+			}
+
+			fyne.Do(func() {
+				mutating = false
+
+				if err != nil {
+					enableActions()
+					dialog.ShowError(err, parent)
+					return
+				}
+
+				selected = updated
+
+				if onUpdated != nil {
+					onUpdated(updated)
+				}
+
+				readAction.SetIcon(
+					messageReadActionIcon(updated.Unread),
 				)
 				enableActions()
 			})
@@ -1018,6 +1100,12 @@ func newReaderPane(
 		if starAction != nil {
 			starAction.SetIcon(
 				messageStarIcon(msg.Starred),
+			)
+		}
+
+		if readAction != nil {
+			readAction.SetIcon(
+				messageReadActionIcon(msg.Unread),
 			)
 		}
 

@@ -106,3 +106,21 @@ func TestMessageListPrimaryForStarredViewUsesMessageFolder(
 		)
 	}
 }
+
+func TestMessageListTextStyleUsesUnreadState(
+	t *testing.T,
+) {
+	unread := messageListTextStyle(
+		mailbox.Message{Unread: true},
+	)
+	if !unread.Bold {
+		t.Fatal("unread message style Bold = false")
+	}
+
+	read := messageListTextStyle(
+		mailbox.Message{Unread: false},
+	)
+	if read.Bold {
+		t.Fatal("read message style Bold = true")
+	}
+}
