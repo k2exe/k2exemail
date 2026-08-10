@@ -36,6 +36,8 @@ func newMailShell(
 	}
 
 	reader, showMessage := newReaderPane(
+		parent,
+		messages,
 		mailbox.FolderInbox,
 		nil,
 	)
@@ -108,6 +110,8 @@ func newMailShell(
 				}
 
 				nextReader, nextShowMessage := newReaderPane(
+					parent,
+					messages,
 					folder,
 					onEdit,
 				)
@@ -450,6 +454,8 @@ func messageListPrimary(
 }
 
 func newReaderPane(
+	parent fyne.Window,
+	store mailboxStore,
 	folder mailbox.Folder,
 	onEdit func(mailbox.Message),
 ) (fyne.CanvasObject, func(mailbox.Message)) {
@@ -514,10 +520,17 @@ func newReaderPane(
 	body.Wrapping = fyne.TextWrapWord
 	body.Selectable = true
 
+	attachments, showAttachments := newReaderAttachments(
+		parent,
+		store,
+		folder,
+	)
+
 	message := container.NewVBox(
 		subject,
 		from,
 		to,
+		attachments,
 		widget.NewSeparator(),
 		body,
 	)
@@ -534,6 +547,7 @@ func newReaderPane(
 		from.SetText("From: " + msg.From)
 		to.SetText("To: " + strings.Join(msg.To, ", "))
 		body.SetText(msg.Body)
+		showAttachments(msg)
 	}
 
 	reader := container.NewBorder(
