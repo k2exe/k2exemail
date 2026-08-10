@@ -3,6 +3,10 @@ package ui
 import (
 	"testing"
 
+	"fyne.io/fyne/v2"
+	fyneTest "fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/widget"
+
 	"github.com/k2exe/k2exemail/internal/mailbox"
 )
 
@@ -123,4 +127,191 @@ func TestMessageListTextStyleUsesUnreadState(
 	if read.Bold {
 		t.Fatal("read message style Bold = true")
 	}
+}
+
+func TestMessagePaneDoesNotOpenMessageOnCreation(
+	t *testing.T,
+) {
+	fyneTest.NewApp()
+	messages := []mailbox.Message{
+		{
+			ID:      "message-1",
+			Folder:  mailbox.FolderInbox,
+			From:    "W2ABC",
+			Subject: "First",
+		},
+	}
+
+	opened := 0
+
+	newMessagePane(
+		folderMailView(mailbox.FolderInbox),
+		messages,
+		func(mailbox.Message) {
+			opened++
+		},
+		func() {},
+	)
+
+	if opened != 0 {
+		t.Fatalf(
+			"showMessage calls = %d, want 0",
+			opened,
+		)
+	}
+}
+
+func TestMessagePaneSearchClearsWithoutOpeningFirstResult(
+	t *testing.T,
+) {
+	fyneTest.NewApp()
+	messages := []mailbox.Message{
+		{
+			ID:      "message-1",
+			Folder:  mailbox.FolderInbox,
+			From:    "W2ABC",
+			Subject: "Alpha",
+		},
+		{
+			ID:      "message-2",
+			Folder:  mailbox.FolderInbox,
+			From:    "W2XYZ",
+			Subject: "Bravo",
+		},
+	}
+
+	opened := 0
+	cleared := 0
+
+	pane, _ := newMessagePane(
+		folderMailView(mailbox.FolderInbox),
+		messages,
+		func(mailbox.Message) {
+			opened++
+		},
+		func() {
+			cleared++
+		},
+	)
+
+	search := findEntryWithPlaceholder(
+		pane,
+		"Search mail",
+	)
+	if search == nil {
+		t.Fatal("Search mail entry not found")
+	}
+
+	search.OnChanged("Bravo")
+
+	if opened != 0 {
+		t.Fatalf(
+			"showMessage calls = %d, want 0",
+			opened,
+		)
+	}
+
+	if cleared != 1 {
+		t.Fatalf(
+			"clearMessage calls = %d, want 1",
+			cleared,
+		)
+	}
+}
+
+func findEntryWithPlaceholder(
+	object fyne.CanvasObject,
+	placeholder string,
+) *widget.Entry {
+	if entry, ok := object.(*widget.Entry); ok &&
+		entry.PlaceHolder == placeholder {
+		return entry
+	}
+
+	container, ok := object.(*fyne.Container)
+	if !ok {
+		return nil
+	}
+
+	for _, child := range container.Objects {
+		if entry := findEntryWithPlaceholder(
+			child,
+			placeholder,
+		); entry != nil {
+			return entry
+		}
+	}
+
+	return nil
+}
+
+func TestMessagePaneOpensMessageWhenSelected(
+	t *testing.T,
+) {
+	fyneTest.NewApp()
+
+	messages := []mailbox.Message{
+		{
+			ID:      "message-1",
+			Folder:  mailbox.FolderInbox,
+			From:    "W2ABC",
+			Subject: "First",
+		},
+	}
+
+	var opened mailbox.Message
+	openCount := 0
+
+	pane, _ := newMessagePane(
+		folderMailView(mailbox.FolderInbox),
+		messages,
+		func(msg mailbox.Message) {
+			opened = msg
+			openCount++
+		},
+		func() {},
+	)
+
+	list := findMessageList(pane)
+	if list == nil {
+		t.Fatal("message list not found")
+	}
+
+	list.Select(0)
+
+	if openCount != 1 {
+		t.Fatalf(
+			"showMessage calls = %d, want 1",
+			openCount,
+		)
+	}
+
+	if opened.ID != "message-1" {
+		t.Fatalf(
+			"opened message ID = %q, want %q",
+			opened.ID,
+			"message-1",
+		)
+	}
+}
+
+func findMessageList(
+	object fyne.CanvasObject,
+) *widget.List {
+	if list, ok := object.(*widget.List); ok {
+		return list
+	}
+
+	container, ok := object.(*fyne.Container)
+	if !ok {
+		return nil
+	}
+
+	for _, child := range container.Objects {
+		if list := findMessageList(child); list != nil {
+			return list
+		}
+	}
+
+	return nil
 }
