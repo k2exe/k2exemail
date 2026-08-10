@@ -39,11 +39,33 @@ func newMailShell(
 	var switchFolder func(mailbox.Folder)
 	activity := &mailboxActivityGate{}
 
+	openReply := func(
+		msg mailbox.Message,
+		replyAll bool,
+	) {
+		callsign, _ := getIdentity()
+
+		openReplyWindow(
+			a,
+			parent,
+			messages,
+			msg,
+			callsign,
+			replyAll,
+			func() {
+				if switchFolder != nil {
+					switchFolder(currentFolder)
+				}
+			},
+		)
+	}
+
 	reader, showMessage := newReaderPane(
 		parent,
 		messages,
 		mailbox.FolderInbox,
 		nil,
+		openReply,
 		activity,
 		func() {
 			if switchFolder != nil &&
@@ -123,6 +145,7 @@ func newMailShell(
 					messages,
 					folder,
 					onEdit,
+					openReply,
 					activity,
 					func() {
 						if currentFolder == folder {
@@ -472,6 +495,7 @@ func newReaderPane(
 	store mailboxStore,
 	folder mailbox.Folder,
 	onEdit func(mailbox.Message),
+	onReply func(mailbox.Message, bool),
 	activity *mailboxActivityGate,
 	onRemoved func(),
 ) (fyne.CanvasObject, func(mailbox.Message)) {
@@ -479,6 +503,9 @@ func newReaderPane(
 	var hasSelection bool
 	var removing bool
 	var editAction *widget.ToolbarAction
+	var replyAction *widget.ToolbarAction
+	var replyAllAction *widget.ToolbarAction
+	var forwardAction *widget.ToolbarAction
 	var removeSelected func()
 
 	deleteAction := widget.NewToolbarAction(
@@ -510,19 +537,42 @@ func newReaderPane(
 			deleteAction,
 		)
 	} else {
+		replyAction = widget.NewToolbarAction(
+			theme.MailReplyIcon(),
+			func() {
+				if hasSelection &&
+					!removing &&
+					onReply != nil {
+					onReply(selected, false)
+				}
+			},
+		)
+		replyAction.Disable()
+
+		replyAllAction = widget.NewToolbarAction(
+			theme.MailReplyAllIcon(),
+			func() {
+				if hasSelection &&
+					!removing &&
+					onReply != nil {
+					onReply(selected, true)
+				}
+			},
+		)
+		replyAllAction.Disable()
+
+		// Forward needs attachment-copy semantics and is implemented
+		// separately rather than silently dropping attachments.
+		forwardAction = widget.NewToolbarAction(
+			theme.MailForwardIcon(),
+			func() {},
+		)
+		forwardAction.Disable()
+
 		toolbar = widget.NewToolbar(
-			widget.NewToolbarAction(
-				theme.MailReplyIcon(),
-				func() {},
-			),
-			widget.NewToolbarAction(
-				theme.MailReplyAllIcon(),
-				func() {},
-			),
-			widget.NewToolbarAction(
-				theme.MailForwardIcon(),
-				func() {},
-			),
+			replyAction,
+			replyAllAction,
+			forwardAction,
 			widget.NewToolbarSeparator(),
 			deleteAction,
 		)
@@ -556,6 +606,12 @@ func newReaderPane(
 		if editAction != nil {
 			editAction.Disable()
 		}
+		if replyAction != nil {
+			replyAction.Disable()
+		}
+		if replyAllAction != nil {
+			replyAllAction.Disable()
+		}
 
 		subject.SetText("")
 		from.SetText("")
@@ -587,6 +643,12 @@ func newReaderPane(
 			if editAction != nil {
 				editAction.Disable()
 			}
+			if replyAction != nil {
+				replyAction.Disable()
+			}
+			if replyAllAction != nil {
+				replyAllAction.Disable()
+			}
 
 			go func() {
 				err := trashOrDeleteMessage(
@@ -607,6 +669,14 @@ func newReaderPane(
 							deleteAction.Enable()
 							if editAction != nil {
 								editAction.Enable()
+							}
+							if replyAction != nil &&
+								onReply != nil {
+								replyAction.Enable()
+							}
+							if replyAllAction != nil &&
+								onReply != nil {
+								replyAllAction.Enable()
 							}
 						}
 
@@ -657,6 +727,14 @@ func newReaderPane(
 			deleteAction.Enable()
 			if editAction != nil {
 				editAction.Enable()
+			}
+			if replyAction != nil &&
+				onReply != nil {
+				replyAction.Enable()
+			}
+			if replyAllAction != nil &&
+				onReply != nil {
+				replyAllAction.Enable()
 			}
 		}
 
