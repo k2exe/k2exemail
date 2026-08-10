@@ -31,8 +31,10 @@ func main() {
 		)
 	}
 
+	configPath := config.Path(dirs.Config)
+
 	cfg, err := config.Load(
-		config.Path(dirs.Config),
+		configPath,
 	)
 	if err != nil {
 		log.Fatalf(
@@ -40,6 +42,11 @@ func main() {
 			err,
 		)
 	}
+
+	runtimeConfig := config.NewRuntime(
+		configPath,
+		cfg,
+	)
 
 	store := mailbox.NewStore(dirs.Data)
 	if err := store.Prepare(); err != nil {
@@ -51,11 +58,30 @@ func main() {
 
 	a := app.NewWithID(appID)
 
+	updateIdentity := func(
+		callsign string,
+		locator string,
+	) (string, string, error) {
+		updated, err := runtimeConfig.UpdateIdentity(
+			callsign,
+			locator,
+		)
+		if err != nil {
+			return "", "", err
+		}
+
+		return updated.Callsign,
+			updated.Locator,
+			nil
+	}
+
 	connectCMS := func(
 		ctx context.Context,
 		mode ui.CMSMode,
 		password string,
 	) (int, int, error) {
+		current := runtimeConfig.Current()
+
 		address := winlink.CMSTestAddress
 
 		switch mode {
@@ -74,8 +100,8 @@ func main() {
 			store,
 			winlink.CMSOptions{
 				Address:  address,
-				Callsign: cfg.Callsign,
-				Locator:  cfg.Locator,
+				Callsign: current.Callsign,
+				Locator:  current.Locator,
 				UserAgent: fbb.UserAgent{
 					Name:    appName,
 					Version: appVersion,
@@ -104,8 +130,11 @@ func main() {
 		a,
 		appName,
 		store,
-		cfg.Callsign,
-		cfg.Locator,
+		func() (string, string) {
+			current := runtimeConfig.Current()
+			return current.Callsign, current.Locator
+		},
+		updateIdentity,
 		connectCMS,
 	)
 	if err != nil {

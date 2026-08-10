@@ -12,12 +12,17 @@ type mailboxStore interface {
 	Move(from, to mailbox.Folder, id string) error
 }
 
+type IdentityFunc func() (
+	callsign string,
+	locator string,
+)
+
 func NewMainWindow(
 	a fyne.App,
 	title string,
 	store mailboxStore,
-	callsign string,
-	locator string,
+	identity IdentityFunc,
+	updateIdentity IdentityUpdateFunc,
 	connectCMS CMSConnectFunc,
 ) (fyne.Window, error) {
 	w := a.NewWindow(title)
@@ -26,8 +31,8 @@ func NewMainWindow(
 		a,
 		w,
 		store,
-		callsign,
-		locator,
+		identity,
+		updateIdentity,
 		connectCMS,
 	)
 	if err != nil {
