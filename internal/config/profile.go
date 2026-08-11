@@ -95,7 +95,8 @@ func (p ConnectionProfile) Validate() error {
 			p.Network != NetworkLAN &&
 			p.Network != NetworkAREDN {
 			return fmt.Errorf(
-				"direct TCP does not support network %q",
+				"TCP transport %q does not support network %q",
+				p.Transport,
 				p.Network,
 			)
 		}

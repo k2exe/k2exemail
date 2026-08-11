@@ -194,6 +194,20 @@ func TestConnectionProfileValidate(t *testing.T) {
 			wantErr: "unsupported CMS mode",
 		},
 		{
+			name: "P2P Telnet on radio network",
+			profile: ConnectionProfile{
+				ID:        "radio-telnet-peer",
+				Name:      "Radio Telnet Peer",
+				Network:   NetworkRadio,
+				Transport: TransportP2PTelnet,
+				TCP: &TCPProfile{
+					Address:    "localhost:8774",
+					TargetCall: "W2ABC",
+				},
+			},
+			wantErr: "does not support network",
+		},
+		{
 			name: "direct TCP on radio network",
 			profile: ConnectionProfile{
 				ID:        "radio-peer",
@@ -205,7 +219,7 @@ func TestConnectionProfileValidate(t *testing.T) {
 					TargetCall: "W2ABC",
 				},
 			},
-			wantErr: "direct TCP does not support network",
+			wantErr: "does not support network",
 		},
 		{
 			name: "direct TCP missing settings",
