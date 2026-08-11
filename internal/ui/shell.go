@@ -689,7 +689,7 @@ func newReaderPane(
 	var archiveAction *widget.ToolbarAction
 	var starSelected func()
 	var toggleReadSelected func()
-	var markReadOnOpen func(mailbox.Message)
+	var markReadOnOpen func(mailbox.Message) bool
 	var resumePendingRead func()
 	var pendingRead []mailbox.Message
 	var archiveSelected func()
@@ -916,15 +916,18 @@ func newReaderPane(
 	}
 
 	resumePendingRead = func() {
-		if mutating ||
-			len(pendingRead) == 0 ||
-			markReadOnOpen == nil {
+		if mutating || markReadOnOpen == nil {
 			return
 		}
 
-		pending := pendingRead[0]
-		pendingRead = pendingRead[1:]
-		markReadOnOpen(pending)
+		for len(pendingRead) > 0 {
+			pending := pendingRead[0]
+			pendingRead = pendingRead[1:]
+
+			if markReadOnOpen(pending) {
+				return
+			}
+		}
 	}
 
 	starSelected = func() {
@@ -1056,21 +1059,21 @@ func newReaderPane(
 		}()
 	}
 
-	markReadOnOpen = func(msg mailbox.Message) {
+	markReadOnOpen = func(msg mailbox.Message) bool {
 		if view.isDrafts() ||
 			!msg.Unread ||
 			readAction == nil {
-			return
+			return false
 		}
 
 		if mutating {
 			queuePendingRead(msg)
-			return
+			return false
 		}
 
 		if activity != nil &&
 			!activity.beginMutation() {
-			return
+			return false
 		}
 
 		mutating = true
@@ -1107,6 +1110,8 @@ func newReaderPane(
 				enableActions()
 			})
 		}()
+
+		return true
 	}
 
 	archiveSelected = func() {
