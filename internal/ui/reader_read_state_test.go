@@ -519,3 +519,260 @@ func TestReaderExplicitReadToggleResumesPendingAutomaticRead(
 		t.Fatal("pending message B remained unread")
 	}
 }
+
+func TestReaderMarksEveryOpenedUnreadMessageRead(t *testing.T) {
+	app := fyneTest.NewApp()
+	window := app.NewWindow("test")
+
+	base := mailbox.NewStore(t.TempDir())
+	if err := base.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+
+	messageA := mailbox.Message{
+		ID:      "message-a",
+		Folder:  mailbox.FolderInbox,
+		From:    "W2AAA",
+		Subject: "Message A",
+		Unread:  true,
+	}
+	messageB := mailbox.Message{
+		ID:      "message-b",
+		Folder:  mailbox.FolderInbox,
+		From:    "W2BBB",
+		Subject: "Message B",
+		Unread:  true,
+	}
+	messageC := mailbox.Message{
+		ID:      "message-c",
+		Folder:  mailbox.FolderInbox,
+		From:    "W2CCC",
+		Subject: "Message C",
+		Unread:  true,
+	}
+
+	for _, msg := range []mailbox.Message{
+		messageA,
+		messageB,
+		messageC,
+	} {
+		if err := base.Save(msg); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	store := &blockingMailboxStore{
+		Store:       base,
+		saveStarted: make(chan struct{}),
+		releaseSave: make(chan struct{}),
+	}
+
+	updated := make(chan mailbox.Message, 3)
+
+	_, showMessage, _ := newReaderPane(
+		window,
+		store,
+		folderMailView(mailbox.FolderInbox),
+		nil,
+		nil,
+		nil,
+		nil,
+		func(msg mailbox.Message) {
+			updated <- msg
+		},
+		nil,
+	)
+
+	// A begins an automatic mark-read and blocks in Save.
+	showMessage(messageA)
+
+	select {
+	case <-store.saveStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for message A save")
+	}
+
+	// B and then C are both explicitly opened while A's
+	// automatic read mutation is still in flight.
+	showMessage(messageB)
+	showMessage(messageC)
+
+	close(store.releaseSave)
+
+	wantRead := map[string]bool{
+		messageA.ID: false,
+		messageB.ID: false,
+		messageC.ID: false,
+	}
+
+	deadline := time.After(time.Second)
+	for {
+		allRead := true
+		for _, read := range wantRead {
+			if !read {
+				allRead = false
+				break
+			}
+		}
+		if allRead {
+			break
+		}
+
+		select {
+		case msg := <-updated:
+			if _, ok := wantRead[msg.ID]; ok && !msg.Unread {
+				wantRead[msg.ID] = true
+			}
+		case <-deadline:
+			t.Fatalf(
+				"timed out waiting for opened messages to be marked read: %#v",
+				wantRead,
+			)
+		}
+	}
+
+	for _, msg := range []mailbox.Message{
+		messageA,
+		messageB,
+		messageC,
+	} {
+		persisted, err := base.Load(
+			mailbox.FolderInbox,
+			msg.ID,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if persisted.Unread {
+			t.Fatalf(
+				"opened message %q remained unread",
+				msg.ID,
+			)
+		}
+	}
+}
+
+func TestReaderStarMutationResumesPendingAutomaticRead(t *testing.T) {
+	app := fyneTest.NewApp()
+	window := app.NewWindow("test")
+
+	base := mailbox.NewStore(t.TempDir())
+	if err := base.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+
+	// A starts read so opening it does not trigger automatic read.
+	// Starring A will create the blocking mutation.
+	messageA := mailbox.Message{
+		ID:      "message-a",
+		Folder:  mailbox.FolderInbox,
+		From:    "W2AAA",
+		Subject: "Message A",
+		Unread:  false,
+	}
+	messageB := mailbox.Message{
+		ID:      "message-b",
+		Folder:  mailbox.FolderInbox,
+		From:    "W2BBB",
+		Subject: "Message B",
+		Unread:  true,
+	}
+
+	if err := base.Save(messageA); err != nil {
+		t.Fatal(err)
+	}
+	if err := base.Save(messageB); err != nil {
+		t.Fatal(err)
+	}
+
+	store := &blockingMailboxStore{
+		Store:       base,
+		saveStarted: make(chan struct{}),
+		releaseSave: make(chan struct{}),
+	}
+
+	updated := make(chan mailbox.Message, 3)
+
+	reader, showMessage, _ := newReaderPane(
+		window,
+		store,
+		folderMailView(mailbox.FolderInbox),
+		nil,
+		nil,
+		nil,
+		nil,
+		func(msg mailbox.Message) {
+			updated <- msg
+		},
+		nil,
+	)
+
+	toolbar := findReaderToolbar(reader)
+	if toolbar == nil {
+		t.Fatal("reader toolbar not found")
+	}
+
+	if len(toolbar.Items) <= 4 {
+		t.Fatalf(
+			"reader toolbar has %d items, want at least 5",
+			len(toolbar.Items),
+		)
+	}
+
+	starAction, ok := toolbar.Items[4].(*widget.ToolbarAction)
+	if !ok {
+		t.Fatal("reader star item is not a toolbar action")
+	}
+
+	showMessage(messageA)
+
+	// Start starring A. blockingMailboxStore holds its Save open.
+	starAction.OnActivated()
+
+	select {
+	case <-store.saveStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for message A star save")
+	}
+
+	// Open unread B while A's star mutation is still active.
+	// Its automatic mark-read must be deferred, not lost.
+	showMessage(messageB)
+
+	close(store.releaseSave)
+
+	deadline := time.After(time.Second)
+
+	for {
+		select {
+		case msg := <-updated:
+			if msg.ID == messageB.ID && !msg.Unread {
+				persisted, err := base.Load(
+					mailbox.FolderInbox,
+					messageB.ID,
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if persisted.Unread {
+					t.Fatal("message B remained unread on disk")
+				}
+				return
+			}
+
+		case <-deadline:
+			persisted, err := base.Load(
+				mailbox.FolderInbox,
+				messageB.ID,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			t.Fatalf(
+				"timed out waiting for pending automatic read; message B unread=%v",
+				persisted.Unread,
+			)
+		}
+	}
+}

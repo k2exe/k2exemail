@@ -92,7 +92,8 @@ func newMailShell(
 		openForward,
 		activity,
 		func(updated mailbox.Message) {
-			if updateMessage != nil {
+			if currentView == inboxView &&
+				updateMessage != nil {
 				updateMessage(updated)
 			}
 		},
@@ -170,8 +171,6 @@ func newMailShell(
 					}
 				}
 
-				var updateMessage func(mailbox.Message)
-
 				nextReader, nextShowMessage, nextClearMessage :=
 					newReaderPane(
 						parent,
@@ -182,7 +181,8 @@ func newMailShell(
 						openForward,
 						activity,
 						func(updated mailbox.Message) {
-							if updateMessage != nil {
+							if currentView == view &&
+								updateMessage != nil {
 								updateMessage(updated)
 							}
 						},
@@ -447,6 +447,7 @@ func newMessagePane(
 	filtered := messages
 	var selected mailbox.Message
 	var hasSelection bool
+	var restoringSelection bool
 
 	list := widget.NewList(
 		func() int {
@@ -486,6 +487,9 @@ func newMessagePane(
 	)
 
 	list.OnSelected = func(id widget.ListItemID) {
+		if restoringSelection {
+			return
+		}
 		if id < 0 || id >= len(filtered) {
 			return
 		}
@@ -550,7 +554,9 @@ func newMessagePane(
 
 		for id := range filtered {
 			if sameMessageIdentity(filtered[id], selected) {
+				restoringSelection = true
 				list.Select(id)
+				restoringSelection = false
 				return
 			}
 		}
@@ -683,7 +689,9 @@ func newReaderPane(
 	var archiveAction *widget.ToolbarAction
 	var starSelected func()
 	var toggleReadSelected func()
-	var markReadOnOpen func(mailbox.Message)
+	var markReadOnOpen func(mailbox.Message) bool
+	var resumePendingRead func()
+	var pendingRead []mailbox.Message
 	var archiveSelected func()
 	var removeSelected func()
 
@@ -897,6 +905,31 @@ func newReaderPane(
 		showAttachments(mailbox.Message{})
 	}
 
+	queuePendingRead := func(msg mailbox.Message) {
+		for _, pending := range pendingRead {
+			if sameMessageIdentity(pending, msg) {
+				return
+			}
+		}
+
+		pendingRead = append(pendingRead, msg)
+	}
+
+	resumePendingRead = func() {
+		if mutating || markReadOnOpen == nil {
+			return
+		}
+
+		for len(pendingRead) > 0 {
+			pending := pendingRead[0]
+			pendingRead = pendingRead[1:]
+
+			if markReadOnOpen(pending) {
+				return
+			}
+		}
+	}
+
 	starSelected = func() {
 		if !hasSelection ||
 			mutating ||
@@ -932,6 +965,7 @@ func newReaderPane(
 
 			fyne.Do(func() {
 				mutating = false
+				defer resumePendingRead()
 
 				if err != nil {
 					enableActions()
@@ -1001,6 +1035,7 @@ func newReaderPane(
 
 			fyne.Do(func() {
 				mutating = false
+				defer resumePendingRead()
 
 				if err != nil {
 					enableActions()
@@ -1019,29 +1054,26 @@ func newReaderPane(
 					)
 				}
 
-				pending := selected
 				enableActions()
-
-				if !sameMessageIdentity(pending, msg) &&
-					pending.Unread &&
-					markReadOnOpen != nil {
-					markReadOnOpen(pending)
-				}
 			})
 		}()
 	}
 
-	markReadOnOpen = func(msg mailbox.Message) {
+	markReadOnOpen = func(msg mailbox.Message) bool {
 		if view.isDrafts() ||
 			!msg.Unread ||
-			mutating ||
 			readAction == nil {
-			return
+			return false
+		}
+
+		if mutating {
+			queuePendingRead(msg)
+			return false
 		}
 
 		if activity != nil &&
 			!activity.beginMutation() {
-			return
+			return false
 		}
 
 		mutating = true
@@ -1060,6 +1092,7 @@ func newReaderPane(
 
 			fyne.Do(func() {
 				mutating = false
+				defer resumePendingRead()
 
 				if err == nil {
 					if onUpdated != nil {
@@ -1074,16 +1107,11 @@ func newReaderPane(
 					}
 				}
 
-				pending := selected
 				enableActions()
-
-				if !sameMessageIdentity(pending, msg) &&
-					pending.Unread &&
-					markReadOnOpen != nil {
-					markReadOnOpen(pending)
-				}
 			})
 		}()
+
+		return true
 	}
 
 	archiveSelected = func() {
@@ -1121,6 +1149,7 @@ func newReaderPane(
 
 			fyne.Do(func() {
 				mutating = false
+				defer resumePendingRead()
 
 				if err != nil {
 					enableActions()
@@ -1174,6 +1203,7 @@ func newReaderPane(
 
 				fyne.Do(func() {
 					mutating = false
+					defer resumePendingRead()
 
 					if err != nil {
 						enableActions()
