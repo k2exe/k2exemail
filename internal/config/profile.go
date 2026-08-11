@@ -90,7 +90,7 @@ func (p ConnectionProfile) Validate() error {
 			)
 		}
 
-	case TransportDirectTCP:
+	case TransportP2PTelnet, TransportDirectTCP:
 		if p.Network != NetworkInternet &&
 			p.Network != NetworkLAN &&
 			p.Network != NetworkAREDN {
@@ -104,7 +104,8 @@ func (p ConnectionProfile) Validate() error {
 		}
 		if p.CMS != nil {
 			return fmt.Errorf(
-				"direct TCP profile must not contain CMS settings",
+				"%s profile must not contain CMS settings",
+				p.Transport,
 			)
 		}
 		if err := validateTCPAddress(p.TCP.Address); err != nil {

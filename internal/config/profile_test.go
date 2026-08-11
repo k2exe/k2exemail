@@ -49,6 +49,19 @@ func TestConnectionProfileValidate(t *testing.T) {
 			},
 		},
 		{
+			name: "AREDN P2P Telnet",
+			profile: ConnectionProfile{
+				ID:        "mesh-telnet-peer",
+				Name:      "Mesh Telnet Peer",
+				Network:   NetworkAREDN,
+				Transport: TransportP2PTelnet,
+				TCP: &TCPProfile{
+					Address:    "w2abc-node.local.mesh:8774",
+					TargetCall: "W2ABC",
+				},
+			},
+		},
+		{
 			name: "LAN direct TCP",
 			profile: ConnectionProfile{
 				ID:        "lan-peer",

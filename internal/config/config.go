@@ -27,6 +27,7 @@ type TransportType string
 
 const (
 	TransportCMSTelnet TransportType = "cms_telnet"
+	TransportP2PTelnet TransportType = "p2p_telnet"
 	TransportDirectTCP TransportType = "direct_tcp"
 )
 
