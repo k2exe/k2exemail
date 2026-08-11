@@ -306,6 +306,13 @@ func TestDialWinlinkTelnetLogin(t *testing.T) {
 	}
 	defer conn.Close()
 
+	if _, ok := conn.(*bufferedReadConn); !ok {
+		t.Fatalf(
+			"dialWinlinkTelnet() connection type = %T, want bufferedReadConn",
+			conn,
+		)
+	}
+
 	select {
 	case err := <-serverDone:
 		if err != nil {

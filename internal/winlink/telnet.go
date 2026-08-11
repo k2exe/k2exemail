@@ -15,6 +15,15 @@ type telnetDialFunc func(
 	password string,
 ) (net.Conn, error)
 
+type bufferedReadConn struct {
+	net.Conn
+	reader *bufio.Reader
+}
+
+func (c *bufferedReadConn) Read(p []byte) (int, error) {
+	return c.reader.Read(p)
+}
+
 // dialWinlinkTelnet establishes TCP and performs the Winlink
 // callsign/password Telnet login.
 //
@@ -112,7 +121,10 @@ func dialWinlinkTelnet(
 			}
 
 			keep = true
-			return conn, nil
+			return &bufferedReadConn{
+				Conn:   conn,
+				reader: reader,
+			}, nil
 		}
 	}
 }
