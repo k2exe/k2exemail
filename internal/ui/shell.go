@@ -81,6 +81,7 @@ func newMailShell(
 	}
 
 	var updateMessage func(mailbox.Message)
+	var removeMessage func(mailbox.Message)
 
 	reader, showMessage, clearMessage := newReaderPane(
 		parent,
@@ -95,15 +96,15 @@ func newMailShell(
 				updateMessage(updated)
 			}
 		},
-		func() {
-			if switchView != nil &&
-				currentView == inboxView {
-				switchView(inboxView)
+		func(removed mailbox.Message) {
+			if currentView == inboxView &&
+				removeMessage != nil {
+				removeMessage(removed)
 			}
 		},
 	)
 
-	messagePane, updateMessage := newMessagePane(
+	messagePane, updateMessage, removeMessage := newMessagePane(
 		inboxView,
 		inbox,
 		showMessage,
@@ -185,15 +186,16 @@ func newMailShell(
 								updateMessage(updated)
 							}
 						},
-						func() {
-							if currentView == view {
-								switchView(view)
+						func(removed mailbox.Message) {
+							if currentView == view &&
+								removeMessage != nil {
+								removeMessage(removed)
 							}
 						},
 					)
 
 				var nextMessagePane fyne.CanvasObject
-				nextMessagePane, updateMessage = newMessagePane(
+				nextMessagePane, updateMessage, removeMessage = newMessagePane(
 					view,
 					loaded,
 					nextShowMessage,
@@ -409,7 +411,11 @@ func newMessagePane(
 	messages []mailbox.Message,
 	showMessage func(mailbox.Message),
 	clearMessage func(),
-) (fyne.CanvasObject, func(mailbox.Message)) {
+) (
+	fyne.CanvasObject,
+	func(mailbox.Message),
+	func(mailbox.Message),
+) {
 	titleText := view.title()
 
 	title := widget.NewLabelWithStyle(
@@ -428,15 +434,19 @@ func newMessagePane(
 		empty.Alignment = fyne.TextAlignCenter
 
 		return container.NewBorder(
-			container.NewVBox(title, search),
-			nil,
-			nil,
-			nil,
-			container.NewCenter(empty),
-		), func(mailbox.Message) {}
+				container.NewVBox(title, search),
+				nil,
+				nil,
+				nil,
+				container.NewCenter(empty),
+			),
+			func(mailbox.Message) {},
+			func(mailbox.Message) {}
 	}
 
 	filtered := messages
+	var selected mailbox.Message
+	var hasSelection bool
 
 	list := widget.NewList(
 		func() int {
@@ -480,7 +490,9 @@ func newMessagePane(
 			return
 		}
 
-		showMessage(filtered[id])
+		selected = filtered[id]
+		hasSelection = true
+		showMessage(selected)
 	}
 
 	search.OnChanged = func(query string) {
@@ -488,6 +500,9 @@ func newMessagePane(
 			messages,
 			query,
 		)
+
+		selected = mailbox.Message{}
+		hasSelection = false
 
 		list.UnselectAll()
 		list.Refresh()
@@ -503,13 +518,58 @@ func newMessagePane(
 		list.Refresh()
 	}
 
+	removeMessage := func(removed mailbox.Message) {
+		var removedFromMessages bool
+		var removedFromFiltered bool
+
+		messages, removedFromMessages =
+			removeMessageSnapshot(messages, removed)
+		filtered, removedFromFiltered =
+			removeMessageSnapshot(filtered, removed)
+
+		if !removedFromMessages && !removedFromFiltered {
+			return
+		}
+
+		list.UnselectAll()
+		list.Refresh()
+
+		if !hasSelection {
+			return
+		}
+
+		if sameMessageIdentity(selected, removed) {
+			selected = mailbox.Message{}
+			hasSelection = false
+
+			if clearMessage != nil {
+				clearMessage()
+			}
+			return
+		}
+
+		for id := range filtered {
+			if sameMessageIdentity(filtered[id], selected) {
+				list.Select(id)
+				return
+			}
+		}
+
+		selected = mailbox.Message{}
+		hasSelection = false
+
+		if clearMessage != nil {
+			clearMessage()
+		}
+	}
+
 	return container.NewBorder(
 		container.NewVBox(title, search),
 		nil,
 		nil,
 		nil,
 		list,
-	), updateMessage
+	), updateMessage, removeMessage
 }
 
 func messageListTextStyle(
@@ -605,7 +665,7 @@ func newReaderPane(
 	onForward func(mailbox.Message),
 	activity *mailboxActivityGate,
 	onUpdated func(mailbox.Message),
-	onRemoved func(),
+	onRemoved func(mailbox.Message),
 ) (
 	fyne.CanvasObject,
 	func(mailbox.Message),
@@ -879,24 +939,28 @@ func newReaderPane(
 					return
 				}
 
-				selected = updated
+				if view.isStarred() && !updated.Starred {
+					if onRemoved != nil {
+						onRemoved(updated)
+					} else if sameMessageIdentity(selected, msg) {
+						clearSelection()
+					}
+
+					enableActions()
+					return
+				}
 
 				if onUpdated != nil {
 					onUpdated(updated)
 				}
 
-				if view.isStarred() && !updated.Starred {
-					clearSelection()
-
-					if onRemoved != nil {
-						onRemoved()
-					}
-					return
+				if sameMessageIdentity(selected, msg) {
+					selected = updated
+					starAction.SetIcon(
+						messageStarIcon(updated.Starred),
+					)
 				}
 
-				starAction.SetIcon(
-					messageStarIcon(updated.Starred),
-				)
 				enableActions()
 			})
 		}()
@@ -1065,11 +1129,13 @@ func newReaderPane(
 					return
 				}
 
-				clearSelection()
-
 				if onRemoved != nil {
-					onRemoved()
+					onRemoved(msg)
+				} else if sameMessageIdentity(selected, msg) {
+					clearSelection()
 				}
+
+				enableActions()
 			})
 		}()
 	}
@@ -1116,11 +1182,13 @@ func newReaderPane(
 						return
 					}
 
-					clearSelection()
-
 					if onRemoved != nil {
-						onRemoved()
+						onRemoved(msg)
+					} else if sameMessageIdentity(selected, msg) {
+						clearSelection()
 					}
+
+					enableActions()
 				})
 			}()
 		}
