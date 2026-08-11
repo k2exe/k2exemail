@@ -183,7 +183,7 @@ func TestMessagePaneSearchClearsWithoutOpeningFirstResult(
 	opened := 0
 	cleared := 0
 
-	pane, _ := newMessagePane(
+	pane, _, _ := newMessagePane(
 		folderMailView(mailbox.FolderInbox),
 		messages,
 		func(mailbox.Message) {
@@ -262,7 +262,7 @@ func TestMessagePaneOpensMessageWhenSelected(
 	var opened mailbox.Message
 	openCount := 0
 
-	pane, _ := newMessagePane(
+	pane, _, _ := newMessagePane(
 		folderMailView(mailbox.FolderInbox),
 		messages,
 		func(msg mailbox.Message) {
@@ -314,4 +314,121 @@ func findMessageList(
 	}
 
 	return nil
+}
+
+func TestMessagePaneRemovalPreservesNewerSelection(
+	t *testing.T,
+) {
+	fyneTest.NewApp()
+
+	messages := []mailbox.Message{
+		{
+			ID:      "message-a",
+			Folder:  mailbox.FolderInbox,
+			Subject: "Message A",
+		},
+		{
+			ID:      "message-b",
+			Folder:  mailbox.FolderInbox,
+			Subject: "Message B",
+		},
+		{
+			ID:      "message-c",
+			Folder:  mailbox.FolderInbox,
+			Subject: "Message C",
+		},
+	}
+
+	var opened mailbox.Message
+	cleared := 0
+
+	pane, _, removeMessage := newMessagePane(
+		folderMailView(mailbox.FolderInbox),
+		messages,
+		func(msg mailbox.Message) {
+			opened = msg
+		},
+		func() {
+			cleared++
+		},
+	)
+
+	list := findMessageList(pane)
+	if list == nil {
+		t.Fatal("message list not found")
+	}
+
+	list.Select(1)
+	if opened.ID != "message-b" {
+		t.Fatalf(
+			"opened message = %q, want message-b",
+			opened.ID,
+		)
+	}
+
+	// A disappears after B became the active selection.
+	// B moves from row 1 to row 0 and must remain active.
+	removeMessage(messages[0])
+
+	if got := list.Length(); got != 2 {
+		t.Fatalf("list length = %d, want 2", got)
+	}
+	if opened.ID != "message-b" {
+		t.Fatalf(
+			"opened message after removal = %q, want message-b",
+			opened.ID,
+		)
+	}
+	if cleared != 0 {
+		t.Fatalf(
+			"clearMessage calls = %d, want 0",
+			cleared,
+		)
+	}
+}
+
+func TestMessagePaneRemovalClearsRemovedSelection(
+	t *testing.T,
+) {
+	fyneTest.NewApp()
+
+	messages := []mailbox.Message{
+		{
+			ID:     "message-a",
+			Folder: mailbox.FolderInbox,
+		},
+		{
+			ID:     "message-b",
+			Folder: mailbox.FolderInbox,
+		},
+	}
+
+	cleared := 0
+
+	pane, _, removeMessage := newMessagePane(
+		folderMailView(mailbox.FolderInbox),
+		messages,
+		func(mailbox.Message) {},
+		func() {
+			cleared++
+		},
+	)
+
+	list := findMessageList(pane)
+	if list == nil {
+		t.Fatal("message list not found")
+	}
+
+	list.Select(0)
+	removeMessage(messages[0])
+
+	if got := list.Length(); got != 1 {
+		t.Fatalf("list length = %d, want 1", got)
+	}
+	if cleared != 1 {
+		t.Fatalf(
+			"clearMessage calls = %d, want 1",
+			cleared,
+		)
+	}
 }

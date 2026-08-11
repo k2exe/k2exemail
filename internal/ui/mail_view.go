@@ -110,3 +110,26 @@ func replaceMessageSnapshot(
 
 	return false
 }
+
+func removeMessageSnapshot(
+	messages []mailbox.Message,
+	removed mailbox.Message,
+) ([]mailbox.Message, bool) {
+	for i := range messages {
+		if !sameMessageIdentity(messages[i], removed) {
+			continue
+		}
+
+		remaining := make(
+			[]mailbox.Message,
+			0,
+			len(messages)-1,
+		)
+		remaining = append(remaining, messages[:i]...)
+		remaining = append(remaining, messages[i+1:]...)
+
+		return remaining, true
+	}
+
+	return messages, false
+}

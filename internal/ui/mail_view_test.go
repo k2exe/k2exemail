@@ -290,3 +290,76 @@ func TestReplaceMessageSnapshot(t *testing.T) {
 		t.Fatal("replaceMessageSnapshot() found missing message")
 	}
 }
+
+func TestRemoveMessageSnapshot(t *testing.T) {
+	messages := []mailbox.Message{
+		{
+			ID:      "message-1",
+			Folder:  mailbox.FolderInbox,
+			Subject: "Inbox one",
+		},
+		{
+			ID:      "message-1",
+			Folder:  mailbox.FolderArchive,
+			Subject: "Archive one",
+		},
+		{
+			ID:      "message-2",
+			Folder:  mailbox.FolderInbox,
+			Subject: "Inbox two",
+		},
+	}
+
+	got, removed := removeMessageSnapshot(
+		messages,
+		mailbox.Message{
+			ID:     "message-1",
+			Folder: mailbox.FolderInbox,
+		},
+	)
+	if !removed {
+		t.Fatal("removeMessageSnapshot() removed = false, want true")
+	}
+
+	want := []mailbox.Message{
+		{
+			ID:      "message-1",
+			Folder:  mailbox.FolderArchive,
+			Subject: "Archive one",
+		},
+		{
+			ID:      "message-2",
+			Folder:  mailbox.FolderInbox,
+			Subject: "Inbox two",
+		},
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf(
+			"removeMessageSnapshot() = %#v, want %#v",
+			got,
+			want,
+		)
+	}
+
+	if len(messages) != 3 {
+		t.Fatalf(
+			"original slice length = %d, want 3",
+			len(messages),
+		)
+	}
+
+	notFound, removed := removeMessageSnapshot(
+		messages,
+		mailbox.Message{
+			ID:     "missing",
+			Folder: mailbox.FolderInbox,
+		},
+	)
+	if removed {
+		t.Fatal("missing message removed = true, want false")
+	}
+	if !reflect.DeepEqual(notFound, messages) {
+		t.Fatal("missing-message result changed original messages")
+	}
+}
