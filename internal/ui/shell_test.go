@@ -340,6 +340,7 @@ func TestMessagePaneRemovalPreservesNewerSelection(
 	}
 
 	var opened mailbox.Message
+	openCount := 0
 	cleared := 0
 
 	pane, _, removeMessage := newMessagePane(
@@ -347,6 +348,7 @@ func TestMessagePaneRemovalPreservesNewerSelection(
 		messages,
 		func(msg mailbox.Message) {
 			opened = msg
+			openCount++
 		},
 		func() {
 			cleared++
@@ -377,6 +379,12 @@ func TestMessagePaneRemovalPreservesNewerSelection(
 		t.Fatalf(
 			"opened message after removal = %q, want message-b",
 			opened.ID,
+		)
+	}
+	if openCount != 1 {
+		t.Fatalf(
+			"showMessage calls = %d, want 1",
+			openCount,
 		)
 	}
 	if cleared != 0 {
