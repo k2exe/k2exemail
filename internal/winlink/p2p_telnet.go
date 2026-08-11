@@ -7,28 +7,28 @@ import (
 
 	"github.com/k2exe/k2exemail/internal/mailbox"
 	"github.com/la5nta/wl2k-go/fbb"
-	"github.com/la5nta/wl2k-go/transport/telnet"
 )
 
-const (
-	CMSProductionAddress = telnet.CMSAddress
-	CMSTestAddress       = "cms-z.winlink.org:8772"
-)
+type P2PTelnetOptions struct {
+	Address    string
+	Callsign   string
+	Locator    string
+	TargetCall string
 
-type CMSOptions struct {
-	Address     string
-	Callsign    string
-	Locator     string
+	// Password is the Telnet transport-login password.
+	// It is distinct from Winlink FBB secure login.
+	Password string
+
 	UserAgent   fbb.UserAgent
 	SecureLogin SecureLoginFunc
 }
 
-func ConnectCMS(
+func ConnectP2PTelnet(
 	ctx context.Context,
 	store *mailbox.Store,
-	options CMSOptions,
+	options P2PTelnetOptions,
 ) (fbb.TrafficStats, error) {
-	return connectCMS(
+	return connectP2PTelnet(
 		ctx,
 		store,
 		options,
@@ -36,10 +36,10 @@ func ConnectCMS(
 	)
 }
 
-func connectCMS(
+func connectP2PTelnet(
 	ctx context.Context,
 	store *mailbox.Store,
-	options CMSOptions,
+	options P2PTelnetOptions,
 	dial telnetDialFunc,
 ) (fbb.TrafficStats, error) {
 	if ctx == nil {
@@ -54,24 +54,24 @@ func connectCMS(
 	}
 	if dial == nil {
 		return fbb.TrafficStats{}, fmt.Errorf(
-			"CMS dialer is required",
+			"P2P telnet dialer is required",
 		)
 	}
 
 	options.Address = strings.TrimSpace(options.Address)
-	if options.Address == "" {
-		return fbb.TrafficStats{}, fmt.Errorf(
-			"CMS address is required",
-		)
-	}
-
 	options.Callsign = strings.ToUpper(
 		strings.TrimSpace(options.Callsign),
 	)
-	options.Locator = strings.TrimSpace(
-		options.Locator,
+	options.Locator = strings.TrimSpace(options.Locator)
+	options.TargetCall = strings.ToUpper(
+		strings.TrimSpace(options.TargetCall),
 	)
 
+	if options.Address == "" {
+		return fbb.TrafficStats{}, fmt.Errorf(
+			"P2P telnet address is required",
+		)
+	}
 	if options.Callsign == "" {
 		return fbb.TrafficStats{}, fmt.Errorf(
 			"station callsign is required",
@@ -82,16 +82,21 @@ func connectCMS(
 			"station locator is required",
 		)
 	}
+	if options.TargetCall == "" {
+		return fbb.TrafficStats{}, fmt.Errorf(
+			"target callsign is required",
+		)
+	}
 
 	conn, err := dial(
 		ctx,
 		options.Address,
 		options.Callsign,
-		telnet.CMSPassword,
+		options.Password,
 	)
 	if err != nil {
 		return fbb.TrafficStats{}, fmt.Errorf(
-			"connect CMS telnet: %w",
+			"connect P2P telnet: %w",
 			err,
 		)
 	}
@@ -103,7 +108,8 @@ func connectCMS(
 		ExchangeOptions{
 			Callsign:    options.Callsign,
 			Locator:     options.Locator,
-			TargetCall:  telnet.CMSTargetCall,
+			TargetCall:  options.TargetCall,
+			Master:      false,
 			UserAgent:   options.UserAgent,
 			SecureLogin: options.SecureLogin,
 		},

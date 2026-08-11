@@ -3,44 +3,46 @@ package winlink
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/k2exe/k2exemail/internal/mailbox"
+	apptransport "github.com/k2exe/k2exemail/internal/transport"
 	"github.com/la5nta/wl2k-go/fbb"
-	"github.com/la5nta/wl2k-go/transport/telnet"
 )
 
-const (
-	CMSProductionAddress = telnet.CMSAddress
-	CMSTestAddress       = "cms-z.winlink.org:8772"
-)
-
-type CMSOptions struct {
+type DirectOptions struct {
 	Address     string
 	Callsign    string
 	Locator     string
+	TargetCall  string
 	UserAgent   fbb.UserAgent
 	SecureLogin SecureLoginFunc
 }
 
-func ConnectCMS(
+type directDialFunc func(
+	ctx context.Context,
+	address string,
+) (net.Conn, error)
+
+func ConnectDirect(
 	ctx context.Context,
 	store *mailbox.Store,
-	options CMSOptions,
+	options DirectOptions,
 ) (fbb.TrafficStats, error) {
-	return connectCMS(
+	return connectDirect(
 		ctx,
 		store,
 		options,
-		dialWinlinkTelnet,
+		apptransport.DialTCP,
 	)
 }
 
-func connectCMS(
+func connectDirect(
 	ctx context.Context,
 	store *mailbox.Store,
-	options CMSOptions,
-	dial telnetDialFunc,
+	options DirectOptions,
+	dial directDialFunc,
 ) (fbb.TrafficStats, error) {
 	if ctx == nil {
 		return fbb.TrafficStats{}, fmt.Errorf(
@@ -54,24 +56,24 @@ func connectCMS(
 	}
 	if dial == nil {
 		return fbb.TrafficStats{}, fmt.Errorf(
-			"CMS dialer is required",
+			"direct TCP dialer is required",
 		)
 	}
 
 	options.Address = strings.TrimSpace(options.Address)
-	if options.Address == "" {
-		return fbb.TrafficStats{}, fmt.Errorf(
-			"CMS address is required",
-		)
-	}
-
 	options.Callsign = strings.ToUpper(
 		strings.TrimSpace(options.Callsign),
 	)
-	options.Locator = strings.TrimSpace(
-		options.Locator,
+	options.Locator = strings.TrimSpace(options.Locator)
+	options.TargetCall = strings.ToUpper(
+		strings.TrimSpace(options.TargetCall),
 	)
 
+	if options.Address == "" {
+		return fbb.TrafficStats{}, fmt.Errorf(
+			"direct TCP address is required",
+		)
+	}
 	if options.Callsign == "" {
 		return fbb.TrafficStats{}, fmt.Errorf(
 			"station callsign is required",
@@ -82,16 +84,19 @@ func connectCMS(
 			"station locator is required",
 		)
 	}
+	if options.TargetCall == "" {
+		return fbb.TrafficStats{}, fmt.Errorf(
+			"target callsign is required",
+		)
+	}
 
 	conn, err := dial(
 		ctx,
 		options.Address,
-		options.Callsign,
-		telnet.CMSPassword,
 	)
 	if err != nil {
 		return fbb.TrafficStats{}, fmt.Errorf(
-			"connect CMS telnet: %w",
+			"connect direct TCP: %w",
 			err,
 		)
 	}
@@ -103,7 +108,8 @@ func connectCMS(
 		ExchangeOptions{
 			Callsign:    options.Callsign,
 			Locator:     options.Locator,
-			TargetCall:  telnet.CMSTargetCall,
+			TargetCall:  options.TargetCall,
+			Master:      false,
 			UserAgent:   options.UserAgent,
 			SecureLogin: options.SecureLogin,
 		},
