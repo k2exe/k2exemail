@@ -172,7 +172,7 @@ func TestConnectCMSValidatesBeforeDial(t *testing.T) {
 	}
 }
 
-func TestDialCMSTelnetCancellationDuringLogin(t *testing.T) {
+func TestDialWinlinkTelnetCancellationDuringLogin(t *testing.T) {
 	listener, err := net.Listen(
 		"tcp",
 		"127.0.0.1:0",
@@ -198,7 +198,7 @@ func TestDialCMSTelnetCancellationDuringLogin(t *testing.T) {
 	done := make(chan error, 1)
 
 	go func() {
-		conn, err := dialCMSTelnet(
+		conn, err := dialWinlinkTelnet(
 			ctx,
 			listener.Addr().String(),
 			"K2EXE",
@@ -227,7 +227,7 @@ func TestDialCMSTelnetCancellationDuringLogin(t *testing.T) {
 	case err := <-done:
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf(
-				"dialCMSTelnet() error = %v, want context.Canceled",
+				"dialWinlinkTelnet() error = %v, want context.Canceled",
 				err,
 			)
 		}
@@ -238,7 +238,7 @@ func TestDialCMSTelnetCancellationDuringLogin(t *testing.T) {
 	}
 }
 
-func TestDialCMSTelnetLogin(t *testing.T) {
+func TestDialWinlinkTelnetLogin(t *testing.T) {
 	listener, err := net.Listen(
 		"tcp",
 		"127.0.0.1:0",
@@ -295,14 +295,14 @@ func TestDialCMSTelnetLogin(t *testing.T) {
 		serverDone <- nil
 	}()
 
-	conn, err := dialCMSTelnet(
+	conn, err := dialWinlinkTelnet(
 		context.Background(),
 		listener.Addr().String(),
 		"K2EXE",
 		telnet.CMSPassword,
 	)
 	if err != nil {
-		t.Fatalf("dialCMSTelnet() error = %v", err)
+		t.Fatalf("dialWinlinkTelnet() error = %v", err)
 	}
 	defer conn.Close()
 

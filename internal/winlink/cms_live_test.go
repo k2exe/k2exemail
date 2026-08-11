@@ -30,7 +30,7 @@ func TestLiveCMSTelnetLogin(t *testing.T) {
 	)
 	defer cancel()
 
-	conn, err := dialCMSTelnet(
+	conn, err := dialWinlinkTelnet(
 		ctx,
 		telnet.CMSAddress,
 		callsign,
