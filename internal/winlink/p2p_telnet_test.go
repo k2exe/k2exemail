@@ -10,6 +10,7 @@ import (
 
 	"github.com/k2exe/k2exemail/internal/mailbox"
 	"github.com/la5nta/wl2k-go/fbb"
+	wl2ktelnet "github.com/la5nta/wl2k-go/transport/telnet"
 )
 
 func TestConnectP2PTelnetExchangesOverLoggedInConnection(
@@ -265,5 +266,97 @@ func TestConnectP2PTelnetRejectsNilDialer(t *testing.T) {
 		t.Fatal(
 			"connectP2PTelnet() expected dialer error",
 		)
+	}
+}
+
+func TestConnectP2PTelnetInteroperatesWithWL2KListener(
+	t *testing.T,
+) {
+	listener, err := wl2ktelnet.Listen("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("telnet.Listen() error = %v", err)
+	}
+	defer listener.Close()
+
+	serverDone := make(chan error, 1)
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			serverDone <- err
+			return
+		}
+
+		remote, ok := conn.(interface {
+			RemoteCall() string
+		})
+		if !ok {
+			_ = conn.Close()
+			serverDone <- errors.New(
+				"accepted telnet connection has no remote callsign",
+			)
+			return
+		}
+
+		if remote.RemoteCall() != "K2EXE" {
+			_ = conn.Close()
+			serverDone <- errors.New(
+				"unexpected telnet remote callsign",
+			)
+			return
+		}
+
+		session := fbb.NewSession(
+			"W2ABC",
+			remote.RemoteCall(),
+			"AA00aa",
+			nil,
+		)
+		session.IsMaster(true)
+
+		_, err = session.Exchange(conn)
+		serverDone <- err
+	}()
+
+	store := mailbox.NewStore(t.TempDir())
+
+	stats, err := ConnectP2PTelnet(
+		context.Background(),
+		store,
+		P2PTelnetOptions{
+			Address:    listener.Addr().String(),
+			Callsign:   "K2EXE",
+			Locator:    "FN13",
+			TargetCall: "W2ABC",
+			Password:   "test-password",
+		},
+	)
+	if err != nil {
+		t.Fatalf(
+			"ConnectP2PTelnet() error = %v",
+			err,
+		)
+	}
+
+	if len(stats.Sent) != 0 {
+		t.Fatalf("Sent = %#v, want empty", stats.Sent)
+	}
+	if len(stats.Received) != 0 {
+		t.Fatalf(
+			"Received = %#v, want empty",
+			stats.Received,
+		)
+	}
+
+	select {
+	case err := <-serverDone:
+		if err != nil {
+			t.Fatalf(
+				"wl2k telnet server error = %v",
+				err,
+			)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("wl2k telnet server did not finish")
 	}
 }
